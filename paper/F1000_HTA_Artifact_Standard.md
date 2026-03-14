@@ -132,6 +132,8 @@ The platform's evidence synthesis capabilities extend well beyond what is availa
 
 The validation strategy combines internal reference fixtures with external R comparator checks. This dual approach gives reasonable confidence in the core Markov engine, which achieves agreement with R to within 10^-5^ absolute error. However, the meta-analytic and specialised modules have not all been subjected to the same rigour of external benchmarking. Expanding the validation coverage is a priority for future versions.
 
+Users should verify that model convergence is achieved before interpreting results; the application displays convergence diagnostics and warns when iterative estimators fail to converge within the specified tolerance.
+
 ### Limitations
 
 The following limitations should be considered when interpreting results from this platform:
@@ -164,7 +166,11 @@ Version 0.7 will target expanded external validation fixtures, WebR integration 
 
 - **Source code:** https://github.com/mahmood726-cyber/hta-artifact-standard
 - **Archived source code at time of publication:** [ZENODO_DOI_PLACEHOLDER]
+- **Live demo:** https://mahmood726-cyber.github.io/hta-artifact-standard/
 - **Licence:** MIT
+
+An `renv.lock` file is included to pin R package versions (R 4.5.2, metafor 4.8-0) used in external validation.
+
 - **Software version:** 0.6
 
 ## Data availability
