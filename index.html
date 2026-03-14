@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://raw.githubusercontent.com https://zenodo.org https://clinicaltrials.gov https://www.clinicaltrials.gov https://www.clinicaltrialsregister.eu https://www.isrctn.com https://api.github.com wss://hta-collab.example.com; worker-src 'self' blob:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://webr.r-wasm.org; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://raw.githubusercontent.com https://zenodo.org https://clinicaltrials.gov https://www.clinicaltrials.gov https://www.clinicaltrialsregister.eu https://www.isrctn.com https://api.github.com wss://hta-collab.example.com https://webr.r-wasm.org https://repo.r-wasm.org; worker-src 'self' blob: https://webr.r-wasm.org;">
     <title>HTA Artifact Standard v0.5 - Frontier Edition</title>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -6615,5 +6615,386 @@
             }
         }
     </style>
+
+    <!-- WebR In-Browser Validation (MutationObserver auto-injector) -->
+    <script>
+    (function() {
+        'use strict';
+
+        // =====================================================================
+        // WebR VALIDATION CARD — auto-injected into #section-validation
+        // Uses MutationObserver to survive DOM rebuilds (populateValidation)
+        // =====================================================================
+
+        var WEBR_CARD_ID = 'webr-validation-card';
+        var webrInstance = null;
+        var webrLoading = false;
+
+        // Simple HTML escape (self-contained, does not rely on app sanitizer)
+        function esc(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#x27;');
+        }
+
+        function buildWebrCardHTML() {
+            return ''
+                + '<div id="' + WEBR_CARD_ID + '" style="margin-top:24px;border:2px solid #7c3aed;border-radius:12px;overflow:hidden;">'
+                +   '<div style="background:linear-gradient(135deg,#7c3aed,#a855f7);padding:16px 20px;color:#fff;">'
+                +     '<div style="display:flex;align-items:center;gap:10px;">'
+                +       '<span style="font-size:22px;">&#x1F9EA;</span>'
+                +       '<div>'
+                +         '<h3 style="margin:0;font-size:16px;font-weight:700;">WebR: Verify with R metafor in Your Browser</h3>'
+                +         '<p style="margin:4px 0 0;font-size:12px;opacity:0.9;">Independent gold-standard cross-check &mdash; runs entirely client-side via WebAssembly</p>'
+                +       '</div>'
+                +     '</div>'
+                +   '</div>'
+                +   '<div style="padding:20px;background:var(--bg-card,#fff);">'
+                +     '<p style="margin:0 0 12px;font-size:13px;color:var(--text-muted,#64748b);">'
+                +       'Extracts effect sizes (yi) and standard errors from the Meta-Analysis data table, '
+                +       'then runs <code>metafor::rma()</code> in a real R session compiled to WebAssembly. '
+                +       'Falls back to base-R DerSimonian-Laird if metafor cannot be installed.'
+                +     '</p>'
+                +     '<button id="webrRunBtn" style="'
+                +       'background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;border:none;'
+                +       'padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;'
+                +       'transition:opacity 0.2s;"'
+                +       ' onmouseover="this.style.opacity=\'0.85\'" onmouseout="this.style.opacity=\'1\'"'
+                +     '>Load R &amp; Validate</button>'
+                +     '<div id="webrProgress" style="display:none;margin-top:12px;">'
+                +       '<div style="display:flex;align-items:center;gap:8px;">'
+                +         '<div class="webr-spinner" style="width:18px;height:18px;border:3px solid #e2e8f0;'
+                +           'border-top-color:#7c3aed;border-radius:50%;animation:webrSpin 0.8s linear infinite;"></div>'
+                +         '<span id="webrProgressText" style="font-size:13px;color:var(--text-muted,#64748b);">Initializing WebR...</span>'
+                +       '</div>'
+                +     '</div>'
+                +     '<div id="webrResults" style="margin-top:16px;"></div>'
+                +   '</div>'
+                + '</div>';
+        }
+
+        // Inject CSS keyframe for spinner (only once)
+        function ensureSpinnerCSS() {
+            if (document.getElementById('webr-spinner-css')) return;
+            var style = document.createElement('style');
+            style.id = 'webr-spinner-css';
+            style.textContent = '@keyframes webrSpin{to{transform:rotate(360deg)}}';
+            document.head.appendChild(style);
+        }
+
+        // Inject the WebR card into the validation section
+        function injectWebrCard() {
+            // Only inject if section-validation exists and card is not already present
+            if (document.getElementById(WEBR_CARD_ID)) return;
+            var section = document.getElementById('section-validation');
+            if (!section) return;
+            var contentBody = section.querySelector('.content-body');
+            if (!contentBody) return;
+
+            ensureSpinnerCSS();
+            var wrapper = document.createElement('div');
+            wrapper.innerHTML = buildWebrCardHTML();
+            contentBody.appendChild(wrapper.firstChild);
+
+            // Attach click handler
+            var btn = document.getElementById('webrRunBtn');
+            if (btn) {
+                btn.addEventListener('click', runWebRValidation);
+            }
+        }
+
+        // =====================================================================
+        // MutationObserver — re-inject card whenever validation panel is rebuilt
+        // =====================================================================
+        function setupObserver() {
+            // Observe the body for the validation section being added/rebuilt
+            var observer = new MutationObserver(function() {
+                // Check if card needs re-injection
+                if (!document.getElementById(WEBR_CARD_ID)) {
+                    var section = document.getElementById('section-validation');
+                    if (section && section.querySelector('.content-body')) {
+                        injectWebrCard();
+                    }
+                }
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+
+            // Also inject immediately if the section already exists
+            injectWebrCard();
+        }
+
+        // =====================================================================
+        // DATA EXTRACTION — reads from #ma-data-body (meta-analysis data table)
+        // =====================================================================
+        function extractStudyData() {
+            var rows = document.querySelectorAll('#ma-data-body tr');
+            var studies = [];
+            rows.forEach(function(row) {
+                var cells = row.querySelectorAll('input');
+                if (cells.length >= 3) {
+                    var name = (cells[0] && cells[0].value) || '';
+                    var yi = parseFloat(cells[1] && cells[1].value);
+                    var se = parseFloat(cells[2] && cells[2].value);
+                    if (name && isFinite(yi) && isFinite(se) && se > 0) {
+                        studies.push({ name: name, yi: yi, se: se, vi: se * se });
+                    }
+                }
+            });
+            return studies;
+        }
+
+        // Also try to get the app's own results for comparison
+        function getAppResults() {
+            try {
+                if (typeof MetaAnalysisMethods !== 'undefined') {
+                    var studies = extractStudyData();
+                    if (studies.length < 2) return null;
+                    var engine = new MetaAnalysisMethods({ method: 'REML' });
+                    var mapped = studies.map(function(s) { return { effect: s.yi, se: s.se }; });
+                    var r = engine.calculatePooledEffect(mapped);
+                    return {
+                        effect: r.random.effect,
+                        se: r.random.se,
+                        tau2: r.heterogeneity.tauSquared,
+                        I2: r.heterogeneity.I2,
+                        Q: r.heterogeneity.Q,
+                        Qp: r.heterogeneity.pValueQ,
+                        ci_lb: r.random.ci_lower,
+                        ci_ub: r.random.ci_upper,
+                        k: studies.length
+                    };
+                }
+            } catch (e) {
+                // Silently fail — app results are optional for comparison
+            }
+            return null;
+        }
+
+        // =====================================================================
+        // WebR VALIDATION RUNNER
+        // =====================================================================
+        async function runWebRValidation() {
+            var btn = document.getElementById('webrRunBtn');
+            var progress = document.getElementById('webrProgress');
+            var progressText = document.getElementById('webrProgressText');
+            var resultsDiv = document.getElementById('webrResults');
+            if (!btn || !progress || !resultsDiv) return;
+
+            // Extract data first
+            var studies = extractStudyData();
+            if (studies.length < 2) {
+                resultsDiv.innerHTML = '<div style="padding:12px;background:#fef3c7;border:1px solid #f59e0b;'
+                    + 'border-radius:8px;color:#92400e;font-size:13px;">'
+                    + '<strong>No data available.</strong> Please enter at least 2 studies in the '
+                    + 'Meta-Analysis Methods section first, then return here to validate.</div>';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Running...';
+            progress.style.display = 'block';
+            resultsDiv.innerHTML = '';
+
+            try {
+                // Step 1: Load WebR if not already loaded
+                if (!webrInstance) {
+                    if (webrLoading) {
+                        progressText.textContent = 'WebR is already loading, please wait...';
+                        return;
+                    }
+                    webrLoading = true;
+                    progressText.textContent = 'Loading WebR runtime (~15 MB)...';
+
+                    var WebR = (await import('https://webr.r-wasm.org/v0.4.4/webr.mjs')).WebR;
+                    webrInstance = new WebR();
+                    await webrInstance.init();
+                    webrLoading = false;
+                }
+
+                // Step 2: Try metafor first
+                var useMetafor = true;
+                var rSource = 'GOLD STANDARD (metafor)';
+                progressText.textContent = 'Installing metafor package...';
+
+                try {
+                    await webrInstance.evalR('webr::install("metafor", quiet = TRUE)');
+                    await webrInstance.evalR('library(metafor)');
+                } catch (e) {
+                    useMetafor = false;
+                    rSource = 'Fallback (base R DL)';
+                    progressText.textContent = 'metafor unavailable, using base R fallback...';
+                }
+
+                // Step 3: Build R code
+                var yiStr = studies.map(function(s) { return s.yi; }).join(',');
+                var viStr = studies.map(function(s) { return s.vi; }).join(',');
+
+                var rCode;
+                if (useMetafor) {
+                    rCode = [
+                        'yi <- c(' + yiStr + ')',
+                        'vi <- c(' + viStr + ')',
+                        'fit <- rma(yi, vi, method="REML")',
+                        'c(fit$beta[1], fit$se, fit$tau2, fit$I2, fit$QE, fit$QEp,',
+                        '  fit$ci.lb, fit$ci.ub, fit$k, 0)'
+                    ].join('\n');
+                } else {
+                    // DerSimonian-Laird fallback in base R
+                    rCode = [
+                        'yi <- c(' + yiStr + ')',
+                        'vi <- c(' + viStr + ')',
+                        'k <- length(yi)',
+                        'wi <- 1/vi',
+                        'sumW <- sum(wi)',
+                        'theta_fe <- sum(wi * yi) / sumW',
+                        'Q <- sum(wi * (yi - theta_fe)^2)',
+                        'C <- sumW - sum(wi^2)/sumW',
+                        'tau2 <- max(0, (Q - (k - 1)) / C)',
+                        'wi_re <- 1/(vi + tau2)',
+                        'sumW_re <- sum(wi_re)',
+                        'theta_re <- sum(wi_re * yi) / sumW_re',
+                        'se_re <- sqrt(1/sumW_re)',
+                        'I2 <- max(0, (Q - (k-1)) / Q) * 100',
+                        'Qp <- 1 - pchisq(Q, k - 1)',
+                        'ci_lb <- theta_re - qnorm(0.975) * se_re',
+                        'ci_ub <- theta_re + qnorm(0.975) * se_re',
+                        'c(theta_re, se_re, tau2, I2, Q, Qp, ci_lb, ci_ub, k, 1)'
+                    ].join('\n');
+                }
+
+                progressText.textContent = 'Running R analysis...';
+                var rResult = await webrInstance.evalR(rCode);
+                var vals = await rResult.toArray();
+
+                // vals: [effect, se, tau2, I2, Q, Qp, ci_lb, ci_ub, k, fallback_flag]
+                var rData = {
+                    effect: vals[0],
+                    se: vals[1],
+                    tau2: vals[2],
+                    I2: vals[3],
+                    Q: vals[4],
+                    Qp: vals[5],
+                    ci_lb: vals[6],
+                    ci_ub: vals[7],
+                    k: vals[8]
+                };
+
+                // Step 4: Get app results for comparison
+                var appData = getAppResults();
+
+                // Step 5: Render comparison table
+                progressText.textContent = 'Rendering results...';
+                renderComparisonTable(resultsDiv, rData, appData, rSource, studies.length);
+
+                progress.style.display = 'none';
+                btn.textContent = 'Re-run Validation';
+                btn.disabled = false;
+
+            } catch (e) {
+                progress.style.display = 'none';
+                btn.disabled = false;
+                btn.textContent = 'Retry Validation';
+                resultsDiv.innerHTML = '<div style="padding:12px;background:#fef2f2;border:1px solid #ef4444;'
+                    + 'border-radius:8px;color:#991b1b;font-size:13px;">'
+                    + '<strong>WebR Error:</strong> ' + esc(e.message) + '</div>';
+            }
+        }
+
+        // =====================================================================
+        // COMPARISON TABLE RENDERER
+        // =====================================================================
+        function renderComparisonTable(container, rData, appData, rSource, nStudies) {
+            var metrics = [
+                { label: 'Pooled Effect', rVal: rData.effect, appKey: 'effect', decimals: 6 },
+                { label: 'Standard Error', rVal: rData.se, appKey: 'se', decimals: 6 },
+                { label: 'tau-squared', rVal: rData.tau2, appKey: 'tau2', decimals: 6 },
+                { label: 'I-squared (%)', rVal: rData.I2, appKey: 'I2', decimals: 2 },
+                { label: 'Q statistic', rVal: rData.Q, appKey: 'Q', decimals: 4 },
+                { label: 'Q p-value', rVal: rData.Qp, appKey: 'Qp', decimals: 6 },
+                { label: '95% CI Lower', rVal: rData.ci_lb, appKey: 'ci_lb', decimals: 6 },
+                { label: '95% CI Upper', rVal: rData.ci_ub, appKey: 'ci_ub', decimals: 6 }
+            ];
+
+            var badgeColor = rSource.indexOf('metafor') >= 0 ? '#7c3aed' : '#d97706';
+            var badgeText = rSource;
+
+            var html = '';
+            html += '<div style="margin-bottom:12px;">';
+            html += '<span style="display:inline-block;padding:4px 12px;border-radius:20px;'
+                  + 'background:' + badgeColor + ';color:#fff;font-size:12px;font-weight:600;">'
+                  + esc(badgeText) + '</span>';
+            html += ' <span style="font-size:13px;color:var(--text-muted,#64748b);">k = ' + nStudies + ' studies</span>';
+            html += '</div>';
+
+            html += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+            html += '<thead><tr style="background:var(--bg,#f8fafc);">';
+            html += '<th style="padding:8px 12px;text-align:left;border-bottom:2px solid var(--border,#e2e8f0);">Metric</th>';
+            html += '<th style="padding:8px 12px;text-align:right;border-bottom:2px solid var(--border,#e2e8f0);">R (' + esc(rSource.indexOf('metafor') >= 0 ? 'metafor' : 'base R') + ')</th>';
+            if (appData) {
+                html += '<th style="padding:8px 12px;text-align:right;border-bottom:2px solid var(--border,#e2e8f0);">App (JS)</th>';
+                html += '<th style="padding:8px 12px;text-align:right;border-bottom:2px solid var(--border,#e2e8f0);">Match</th>';
+            }
+            html += '</tr></thead><tbody>';
+
+            var allMatch = true;
+            for (var i = 0; i < metrics.length; i++) {
+                var m = metrics[i];
+                var rVal = m.rVal;
+                var rStr = isFinite(rVal) ? rVal.toFixed(m.decimals) : 'N/A';
+
+                html += '<tr style="border-bottom:1px solid var(--border-light,#f1f5f9);">';
+                html += '<td style="padding:8px 12px;font-weight:500;">' + esc(m.label) + '</td>';
+                html += '<td style="padding:8px 12px;text-align:right;font-family:monospace;">' + esc(rStr) + '</td>';
+
+                if (appData) {
+                    var appVal = appData[m.appKey];
+                    var appStr = (appVal != null && isFinite(appVal)) ? appVal.toFixed(m.decimals) : 'N/A';
+                    var match = false;
+                    if (isFinite(rVal) && isFinite(appVal)) {
+                        var tol = Math.max(Math.abs(rVal) * 1e-4, 1e-6);
+                        match = Math.abs(rVal - appVal) < tol;
+                    }
+                    if (!match) allMatch = false;
+
+                    var matchIcon = match ? '<span style="color:#16a34a;">&#x2713;</span>'
+                                         : '<span style="color:#dc2626;">&#x2717;</span>';
+                    html += '<td style="padding:8px 12px;text-align:right;font-family:monospace;">' + esc(appStr) + '</td>';
+                    html += '<td style="padding:8px 12px;text-align:center;">' + matchIcon + '</td>';
+                }
+                html += '</tr>';
+            }
+            html += '</tbody></table>';
+
+            // Verdict
+            if (appData) {
+                if (allMatch) {
+                    html += '<div style="margin-top:16px;padding:12px 16px;background:#f0fdf4;border:1px solid #86efac;'
+                         + 'border-radius:8px;color:#166534;font-size:14px;font-weight:600;">'
+                         + '&#x2705; All 8 metrics match R within tolerance &#8212; VALIDATED</div>';
+                } else {
+                    html += '<div style="margin-top:16px;padding:12px 16px;background:#fef3c7;border:1px solid #fcd34d;'
+                         + 'border-radius:8px;color:#92400e;font-size:14px;">'
+                         + '&#x26A0;&#xFE0F; Some metrics differ from R. Small numerical differences '
+                         + '(&lt;0.01%) are expected due to optimizer convergence tolerances in REML.</div>';
+                }
+            }
+
+            container.innerHTML = html;
+        }
+
+        // =====================================================================
+        // BOOTSTRAP — run on DOMContentLoaded and set up observer
+        // =====================================================================
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', setupObserver);
+        } else {
+            setupObserver();
+        }
+
+    })();
+    </script>
 </body>
 </html>
