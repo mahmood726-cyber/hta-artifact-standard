@@ -247,70 +247,148 @@ class IPDMetaAnalysis {
     }
 
     _fitLinearMixedModel(y, X, Z, studies) {
-        // Simplified REML estimation for linear mixed model
+        // Study-blocked WLS — avoids O(n^3) full matrix inversion
         const n = y.length;
         const k = studies.length;
+        const varNames = Object.keys(X[0]);
+        const p = varNames.length;
 
-        // Initial values
+        // Map patients to studies using Z matrix
+        const studyIndices = new Map();
+        studies.forEach(s => studyIndices.set(s, []));
+        Z.forEach((row, i) => {
+            const sKey = Object.keys(row).find(k => k.startsWith('intercept_') && row[k] === 1);
+            if (sKey) studyIndices.get(sKey.replace('intercept_', '')).push(i);
+        });
+
+        // Initial variance estimates
         let sigma2_e = this._variance(y);
         let sigma2_u0 = sigma2_e * 0.5;
 
-        // REML iterations
-        for (let iter = 0; iter < 100; iter++) {
-            // E-step: Calculate BLUPs
-            const V = this._computeVMatrix(Z, sigma2_u0, sigma2_e, n);
-            const Vinv = this._invertMatrix(V);
+        let beta;
+        // REML via patient-level WLS with block-diagonal weights
+        // Weight for patient i in study j: w_ij = 1/sigma2_e (within)
+        // Study random effect adds sigma2_u0 to all same-study pairs
+        // Effective per-patient weight: 1/(sigma2_e * (1 - sigma2_u0/(sigma2_e + nj*sigma2_u0)))
+        for (let iter = 0; iter < 50; iter++) {
+            const XtWX = Array.from({length: p}, () => new Float64Array(p));
+            const XtWy = new Float64Array(p);
 
-            // Fixed effects: (X'V^-1 X)^-1 X'V^-1 y
-            const XtVinv = this._multiplyMatrices(this._transpose(X), Vinv);
-            const XtVinvX = this._multiplyMatrices(XtVinv, X);
-            const beta = this._solve(XtVinvX, this._multiplyMatrixVector(XtVinv, y));
+            for (const [, indices] of studyIndices) {
+                const nj = indices.length;
+                if (nj === 0) continue;
+                // Block-diagonal inverse: each patient gets weight 1/sigma2_e
+                // minus cross-study correlation correction
+                const wDiag = 1 / Math.max(sigma2_e, 1e-10);
+                const wCross = sigma2_u0 / Math.max(sigma2_e * (sigma2_e + nj * sigma2_u0), 1e-10);
+                for (const i of indices) {
+                    const xi = varNames.map(v => X[i][v] ?? 0);
+                    const yi_val = y[i];
+                    // Diagonal contribution
+                    for (let a = 0; a < p; a++) {
+                        XtWy[a] += wDiag * xi[a] * yi_val;
+                        for (let b = 0; b < p; b++) XtWX[a][b] += wDiag * xi[a] * xi[b];
+                    }
+                }
+                // Cross-study correction (subtract)
+                const xSum = new Float64Array(p);
+                let ySum = 0;
+                for (const i of indices) {
+                    for (let v = 0; v < p; v++) xSum[v] += (X[i][varNames[v]] ?? 0);
+                    ySum += y[i];
+                }
+                for (let a = 0; a < p; a++) {
+                    XtWy[a] -= wCross * xSum[a] * ySum;
+                    for (let b = 0; b < p; b++) XtWX[a][b] -= wCross * xSum[a] * xSum[b];
+                }
+            }
 
-            // Residuals
-            const fitted = this._multiplyMatrixVector(X, beta);
-            const resid = y.map((yi, i) => yi - fitted[i]);
+            beta = this._solve(XtWX, Array.from(XtWy));
 
-            // M-step: Update variance components
+            // Update variance components
+            let ssResid = 0;
+            const studyResids = [];
+            for (const [, indices] of studyIndices) {
+                let rSum = 0;
+                for (const i of indices) {
+                    let f = 0;
+                    for (let v = 0; v < p; v++) f += beta[v] * (X[i][varNames[v]] ?? 0);
+                    const r = y[i] - f;
+                    ssResid += r * r;
+                    rSum += r;
+                }
+                if (indices.length > 0) studyResids.push(rSum / indices.length);
+            }
+
             const oldSigma2_u0 = sigma2_u0;
             const oldSigma2_e = sigma2_e;
+            sigma2_e = ssResid / Math.max(1, n - p);
+            const varStudy = studyResids.length > 1
+                ? studyResids.reduce((a, r) => a + r * r, 0) / (studyResids.length - 1) : 0;
+            sigma2_u0 = Math.max(0, varStudy - sigma2_e / (n / k));
 
-            // Update estimates (simplified)
-            sigma2_e = this._variance(resid) * (n / (n - Object.keys(X[0]).length));
-            sigma2_u0 = Math.max(0, this._estimateBetweenStudyVariance(resid, studies, Z));
-
-            // Check convergence
             if (Math.abs(sigma2_u0 - oldSigma2_u0) < 1e-6 &&
                 Math.abs(sigma2_e - oldSigma2_e) < 1e-6) break;
         }
 
-        // Final estimates
-        const V = this._computeVMatrix(Z, sigma2_u0, sigma2_e, n);
-        const Vinv = this._invertMatrix(V);
-        const XtVinv = this._multiplyMatrices(this._transpose(X), Vinv);
-        const XtVinvX = this._multiplyMatrices(XtVinv, X);
-        const XtVinvXinv = this._invertMatrix(XtVinvX);
-        const beta = this._solve(XtVinvX, this._multiplyMatrixVector(XtVinv, y));
+        // Final: recompute with converged variances for SEs
+        const XtWX = Array.from({length: p}, () => new Float64Array(p));
+        const XtWy = new Float64Array(p);
+        for (const [, indices] of studyIndices) {
+            const nj = indices.length;
+            if (nj === 0) continue;
+            const wDiag = 1 / Math.max(sigma2_e, 1e-10);
+            const wCross = sigma2_u0 / Math.max(sigma2_e * (sigma2_e + nj * sigma2_u0), 1e-10);
+            for (const i of indices) {
+                const xi = varNames.map(v => X[i][v] ?? 0);
+                for (let a = 0; a < p; a++) {
+                    XtWy[a] += wDiag * xi[a] * y[i];
+                    for (let b = 0; b < p; b++) XtWX[a][b] += wDiag * xi[a] * xi[b];
+                }
+            }
+            const xSum = new Float64Array(p);
+            let ySum = 0;
+            for (const i of indices) {
+                for (let v = 0; v < p; v++) xSum[v] += (X[i][varNames[v]] ?? 0);
+                ySum += y[i];
+            }
+            for (let a = 0; a < p; a++) {
+                XtWy[a] -= wCross * xSum[a] * ySum;
+                for (let b = 0; b < p; b++) XtWX[a][b] -= wCross * xSum[a] * xSum[b];
+            }
+        }
+        beta = this._solve(XtWX, Array.from(XtWy));
+        const XtWXinv = this._invertMatrix(XtWX); // Only p×p (tiny)
 
-        // Standard errors
-        const varNames = Object.keys(X[0]);
         const fixedEffects = {};
         varNames.forEach((name, i) => {
             fixedEffects[name] = {
                 estimate: beta[i],
-                se: Math.sqrt(XtVinvXinv[i][i])
+                se: Math.sqrt(Math.max(0, XtWXinv[i]?.[i] ?? 0))
             };
         });
 
-        // BLUPs for study effects
-        const blups = this._calculateBLUPs(y, X, Z, beta, sigma2_u0, sigma2_e, studies);
+        // BLUPs: shrunk study means
+        const blups = {};
+        for (const [s, indices] of studyIndices) {
+            const nj = indices.length;
+            let rSum = 0;
+            for (const i of indices) {
+                let f = 0;
+                for (let v = 0; v < p; v++) f += beta[v] * (X[i][varNames[v]] ?? 0);
+                rSum += y[i] - f;
+            }
+            const shrink = sigma2_u0 / Math.max(sigma2_u0 + sigma2_e / nj, 1e-10);
+            blups[s] = shrink * (rSum / nj);
+        }
 
         return {
             fixedEffects,
             sigma2_u0,
             sigma2_e,
             blups,
-            logLik: this._computeREMLLogLik(y, X, V),
-            nParams: varNames.length + 2
+            logLik: -0.5 * n * Math.log(2 * Math.PI * sigma2_e) - 0.5 * k * Math.log(1 + sigma2_u0 * (n / k) / sigma2_e),
+            nParams: p + 2
         };
     }
 
