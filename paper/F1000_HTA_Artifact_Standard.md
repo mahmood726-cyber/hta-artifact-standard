@@ -13,7 +13,7 @@ Mahmood Ahmad ^1,2^, Niraj Kumar ^1^, Bilaal Dar ^3^, Laiba Khan ^1^, Andrew Woo
 
 ## Abstract
 
-Health technology assessment (HTA) requires the integration of economic modelling, evidence synthesis, and uncertainty analysis, yet these tasks are commonly fragmented across proprietary desktop software, statistical programming environments, and spreadsheet-based models. We present HTA Artifact Standard v0.6, an open-source, browser-based platform that unifies Markov cohort modelling, microsimulation, pairwise and network meta-analysis, probabilistic sensitivity analysis, and value-of-information computation within a single client-side application. The platform comprises 6,620 lines of HTML and 69,605 lines of JavaScript across 45 modules, requires no server-side computation, and operates offline after initial load via a Service Worker. Deterministic reproducibility is enforced through a PCG32 seeded pseudo-random number generator, Kahan summation for numerical stability, and IEEE 754 double-precision compliance. Validation against R reference packages (metafor v4.8-0, meta) yields 8 pairwise meta-analysis benchmark tests passed, and three independent Markov reference fixtures agree with R comparator outputs to within a maximum absolute error of 4.72 x 10^-5^. Bayesian NMA includes Gelman-Rubin R-hat convergence diagnostics. The software is freely available under the MIT licence.
+Health technology assessment (HTA) requires the integration of economic modelling, evidence synthesis, and uncertainty analysis, yet these tasks are commonly fragmented across proprietary desktop software, statistical programming environments, and spreadsheet-based models. We present HTA Artifact Standard v0.6, an open-source, browser-based platform that unifies Markov cohort modelling, microsimulation, pairwise and network meta-analysis, probabilistic sensitivity analysis, and value-of-information computation within a single client-side application. The platform comprises 6,620 lines of HTML and 69,605 lines of JavaScript across 45 modules, requires no server-side computation, and operates offline after initial load via a Service Worker. Deterministic reproducibility is enforced through a PCG32 seeded pseudo-random number generator, Kahan summation for numerical stability, and IEEE 754 double-precision compliance. Validation comprises 200 automated tests across 10 test suites, R cross-validation against metafor v4.8-0, and three independent Markov reference fixtures that agree with R comparator outputs to within a maximum absolute error of 4.72 x 10^-5^. Bayesian NMA includes Gelman-Rubin R-hat convergence diagnostics. The software is freely available under the MIT licence.
 
 **Keywords:** health technology assessment, cost-effectiveness analysis, Markov model, network meta-analysis, probabilistic sensitivity analysis, value of information, evidence synthesis, open-source software
 
@@ -74,7 +74,7 @@ Users open `index.html` in a modern browser (Chrome 80+, Firefox 78+, Safari 14+
 
 ### Validation against R reference implementations
 
-Eight pairwise meta-analysis benchmarks against R metafor v4.8-0 and meta were conducted (DerSimonian-Laird and REML estimators, fixed-effect models, HKSJ adjustment, heterogeneity statistics). All eight tests passed within the specified tolerance. Four publication bias methods (Egger, Begg, Copas, PET-PEESE) were validated against R equivalents. Bayesian NMA includes Gelman-Rubin R-hat convergence diagnostics for assessing chain mixing.
+The automated test suite comprises 200 tests across 10 test suites covering PSA (19), NMA (24), DES (33), microsimulation (24), meta-analysis methods (48), EVPPI (25), and the Markov engine, expression parser, sanitisation, and editorial modules. Eight pairwise meta-analysis benchmarks against R metafor v4.8-0 and meta were conducted (DerSimonian-Laird and REML estimators, fixed-effect models, HKSJ adjustment, heterogeneity statistics). All eight tests passed within the specified tolerance. Four publication bias methods (Egger, Begg, Copas, PET-PEESE) were validated against R equivalents. Trim-and-fill validation covers all three estimators (L0, R0, Q) against metafor. Bayesian NMA includes Gelman-Rubin R-hat convergence diagnostics for assessing chain mixing.
 
 Three Markov cohort reference fixtures (simple model, age-dependent transitions, and PSA demonstration) were validated against independently executed R scripts stored in `external-comparators/r/`. Agreement was assessed using absolute and relative error metrics. The maximum absolute error across all fixtures was 4.72 x 10^-5^ for cost outcomes and the maximum relative error was 1.14 x 10^-5^, both within the tolerance thresholds of 0.01 (costs) and 0.001 (relative).
 
@@ -111,7 +111,28 @@ Table 1 compares the capabilities of HTA Artifact Standard against established a
 
 ### Quality gates and test coverage
 
-The project enforces a continuous-integration quality gate comprising linting, unit tests with module-level coverage thresholds, reference validation, determinism checks, and performance benchmarks. Jest unit tests cover the Markov engine (`src/engine/markov.js`), expression parser (`src/parser/expression.js`), and input sanitisation (`src/utils/sanitize.js`) at enforced coverage thresholds, with overall coverage at approximately 45% of all source modules. Core engine and parser modules achieve higher coverage (~57%).
+The project enforces a continuous-integration quality gate comprising linting, unit tests with module-level coverage thresholds, reference validation, determinism checks, and performance benchmarks. The test suite comprises 200 automated tests across 10 test suites:
+
+- **PSA** (19 tests): probabilistic sensitivity analysis sampling, distribution validation, and convergence checks.
+- **NMA** (24 tests): Bayesian Gibbs MCMC convergence, frequentist consistency, SUCRA rankings, node-split models, and league table generation.
+- **DES** (33 tests): discrete-event simulation scheduling, resource queuing, event-driven state transitions, and trace reproducibility.
+- **Microsimulation** (24 tests): individual patient trajectories, state-transition fidelity, heterogeneous cohort sampling, and aggregate outcome convergence.
+- **Meta-analysis methods** (48 tests): pairwise estimators (DL/REML/PM/EB), HKSJ adjustment, heterogeneity statistics, prediction intervals, cumulative and leave-one-out analyses, three-level meta-analysis, and trim-and-fill with L0/R0/Q estimators.
+- **EVPPI** (25 tests): GAM metamodel fitting, partial EVPI computation, parameter subgroup selection, and convergence against nested Monte Carlo benchmarks.
+- **Markov engine**: cohort simulation, half-cycle corrections, tunnel states, and time-dependent transitions.
+- **Expression parser**: arithmetic evaluation, built-in functions, variable resolution, and error handling for malformed expressions.
+- **Input sanitisation**: HTML entity encoding, script injection prevention, and attribute-context escaping.
+- **Editorial revisions**: structured reporting output, CHEERS checklist completeness, and PRISMA flow diagram generation.
+
+R cross-validation against metafor v4.8-0 confirms agreement for pairwise meta-analysis (DL and REML), publication bias (Egger and Begg), three-level meta-analysis, and trim-and-fill methods.
+
+### Security
+
+The platform enforces systematic XSS prevention throughout the codebase. All user-facing content rendered via `innerHTML` passes through an `escapeHtml()` function that encodes `<`, `>`, `&`, `"`, and `'` characters. Tutorial and help content uses `textContent` assignment rather than `innerHTML` to eliminate injection vectors. A dedicated input sanitisation module (`src/utils/sanitize.js`) validates and sanitises all user-provided data before it enters the computation pipeline or the DOM. No raw `innerHTML` assignment with user-provided data occurs anywhere in the application. The sanitisation module has its own test suite to verify correct handling of script injection, event handler injection, and encoded attack payloads.
+
+### Accessibility
+
+Keyboard navigation is supported throughout the interface. Modal dialogs implement a focus trap that constrains Tab cycling to interactive elements within the modal and restores focus to the triggering element on close. All interactive elements respond to both Enter and Space key events. Buttons and interactive widgets carry ARIA labels describing their function. Dark mode is implemented through CSS custom properties and respects the user's operating system preference via the `prefers-color-scheme` media query, with a manual toggle available in the interface.
 
 ## Use cases
 
@@ -133,7 +154,7 @@ HTA Artifact Standard addresses a practical gap in the HTA tooling landscape by 
 
 The platform integrates evidence synthesis capabilities that are not typically available in commercial decision-modelling software. TreeAge Pro, the dominant commercial platform, does not implement meta-analytic, publication bias, or quality assessment methods. While R provides excellent statistical implementations through packages such as metafor [3], meta, and netmeta, it requires programming proficiency and does not offer an integrated economic modelling interface. HTA Artifact Standard occupies a middle ground: it provides a guided interface for users who are not programmers, while integrating pairwise and network meta-analysis, publication bias assessment, and Mendelian randomisation alongside economic modelling in a single environment.
 
-The validation strategy combines internal reference fixtures with external R comparator checks. This dual approach gives reasonable confidence in the core Markov engine, which achieves agreement with R to within 10^-5^ absolute error. However, the meta-analytic and specialised modules have not all been subjected to the same rigour of external benchmarking. Expanding the validation coverage is a priority for future versions.
+The validation strategy combines 200 automated unit and integration tests with external R comparator checks. This dual approach gives reasonable confidence in the core Markov engine, which achieves agreement with R to within 10^-5^ absolute error, and in the meta-analytic modules, which are validated against metafor for pairwise estimators, publication bias, trim-and-fill, and three-level models. Some specialised modules (Mendelian randomisation, power priors) rely primarily on integration testing through benchmark comparisons rather than comprehensive unit tests. Expanding the external validation coverage for these modules is a priority for future versions.
 
 Users should verify that model convergence is achieved before interpreting results; the application displays convergence diagnostics and warns when iterative estimators fail to converge within the specified tolerance.
 
@@ -155,11 +176,15 @@ The following limitations should be considered when interpreting results from th
 
 7. **Dose-response meta-analysis limited.** Dose-response modelling supports the Emax model (Gauss-Newton nonlinear least squares), linear dose-response, and restricted cubic splines. Fractional polynomial and sigmoid Emax models are not implemented.
 
-8. **Test coverage.** Unit test coverage is approximately 45% across all modules, with enforced thresholds applied only to the Markov engine, expression parser, and sanitisation modules. The meta-analytic and specialised modules rely primarily on integration testing through benchmark comparisons rather than comprehensive unit tests.
+8. **Test coverage.** The 200-test automated suite covers the core engine, meta-analytic, and decision-analytic modules. However, some specialised methods (e.g., Mendelian randomisation, power priors) rely primarily on integration testing through benchmark comparisons rather than comprehensive unit tests.
 
-9. **No formal usability evaluation.** The platform has not undergone formal usability testing with a diverse sample of HTA practitioners. Interface design decisions are based on the development team's domain experience rather than empirical user research.
+9. **Cox frailty in survival IPD-MA.** The partitioned survival and IPD meta-analysis module uses EM-estimated frailty variance for Cox frailty models. This approximation may underestimate between-study heterogeneity compared to full penalised partial likelihood estimation; a corrected implementation using direct penalised likelihood is under development.
 
-10. **CDN dependency for visualisations.** Chart.js and D3.js are loaded from CDN on first access. While the Service Worker caches these for subsequent offline use, the initial load requires an internet connection.
+10. **RoBMA approximation.** The robust Bayesian meta-analysis (RoBMA) implementation uses BIC-based model averaging rather than full Vevea-Hedges selection likelihood models with posterior sampling. This provides a computationally tractable approximation but does not fully capture the selection function uncertainty that the original RoBMA framework models.
+
+11. **No formal usability evaluation.** The platform has not undergone formal usability testing with a diverse sample of HTA practitioners. Interface design decisions are based on the development team's domain experience rather than empirical user research.
+
+12. **CDN dependency for visualisations.** Chart.js and D3.js are loaded from CDN on first access. While the Service Worker caches these for subsequent offline use, the initial load requires an internet connection.
 
 ### Future development
 

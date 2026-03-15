@@ -386,16 +386,24 @@ class IPDMetaAnalysis {
     }
 
     _fitCoxMixedModel(data, X, Z, studies, outcomeVar) {
-        // Shared frailty Cox model with EM-estimated frailty variance
-        // Reference: Therneau & Grambsch (2000), Modeling Survival Data, Ch. 9
+        // Shared Gaussian frailty Cox model via EM algorithm
         // Reference: Ripatti & Palmgren (2000), Biometrics 56:1016-1022
+        // Reference: Therneau & Grambsch (2000), Modeling Survival Data, Ch. 9
+        //
+        // Model: h_ij(t) = h0(t) * exp(X_ij' beta + u_j)
+        //   u_j ~ N(0, sigma2_u0)  — Gaussian shared frailty per study
+        //
+        // EM approach (Gaussian frailty via martingale residuals):
+        //   E-step: posterior frailty u_j = R_j / (n_j + 1/sigma2_u0)
+        //           posterior variance  v_j = 1 / (n_j + 1/sigma2_u0)
+        //   M-step: sigma2_u0 = (1/k) * sum(u_j^2 + v_j)
 
         const times = data.map(d => d[outcomeVar].time);
         const events = data.map(d => d[outcomeVar].event);
         const n = data.length;
         const k = studies.length;
 
-        // Sort by time
+        // Sort by time (ascending) for risk set computation
         const order = times.map((t, i) => i).sort((a, b) => times[a] - times[b]);
 
         // Map each observation to its study index using Z matrix
@@ -409,17 +417,18 @@ class IPDMetaAnalysis {
             }
         }
 
-        // Count events per study
-        const dj = new Array(k).fill(0);
+        // Count patients per study
         const nj = new Array(k).fill(0);
         for (let i = 0; i < n; i++) {
-            const j = studyMap[i];
-            nj[j]++;
-            if (events[i]) dj[j]++;
+            nj[studyMap[i]]++;
         }
 
+        // Variable names (exclude intercept — Cox has no intercept)
+        const varNames = Object.keys(X[0]).filter(kk => kk !== 'intercept');
+        const p = varNames.length;
+
         // Newton-Raphson for Cox partial likelihood (initial fit without frailty)
-        let beta = new Array(Object.keys(X[0]).length - 1).fill(0); // Exclude intercept
+        let beta = new Array(p).fill(0);
 
         for (let iter = 0; iter < 50; iter++) {
             const { score, hessian } = this._coxScoreHessian(times, events, X, beta, order);
@@ -431,39 +440,105 @@ class IPDMetaAnalysis {
             if (diff < 1e-8) break;
         }
 
-        // EM algorithm for frailty variance (theta = frailty variance parameter)
-        // Under gamma frailty: w_j ~ Gamma(1/theta, 1/theta), E[w_j]=1, Var[w_j]=theta
-        // E-step: E[w_j|data] = (d_j + 1/theta) / (H_j + 1/theta)
-        // M-step: theta = variance of posterior frailties
-        let theta = 0.5; // Initial frailty variance estimate
-        const frailtyW = new Array(k).fill(1.0);
+        // =====================================================================
+        // EM algorithm for Gaussian shared frailty variance (sigma2_u0)
+        // =====================================================================
+        // Initialize sigma2_u0 > 0 to avoid division by zero in 1/sigma2_u0
+        let sigma2_u0 = 0.1;
+        const u = new Array(k).fill(0); // posterior frailty means
+        const v = new Array(k).fill(0); // posterior frailty variances
 
-        for (let emIter = 0; emIter < 100; emIter++) {
-            // Compute cumulative hazard per study (Breslow estimator)
-            const Hj = this._computeStudyCumulativeHazard(times, events, X, beta, order, studyMap, k);
+        for (let emIter = 0; emIter < 50; emIter++) {
+            // -----------------------------------------------------------------
+            // Compute martingale residuals: r_i = event_i - predicted_hazard_i
+            // predicted_hazard_i = cumHaz(time_i) * exp(X_i' beta + u_{study(i)})
+            // where cumHaz is the Breslow baseline cumulative hazard
+            // -----------------------------------------------------------------
 
-            // E-step: posterior frailty expectations
-            const invTheta = theta > 1e-10 ? 1 / theta : 1e10;
-            for (let j = 0; j < k; j++) {
-                frailtyW[j] = (dj[j] + invTheta) / (Hj[j] + invTheta);
+            // Linear predictor including current frailty
+            const lp = new Array(n);
+            for (let i = 0; i < n; i++) {
+                lp[i] = u[studyMap[i]]; // frailty offset
+                for (let jj = 0; jj < p; jj++) {
+                    lp[i] += beta[jj] * (X[i][varNames[jj]] || 0);
+                }
+            }
+            const expLp = lp.map(l => Math.exp(l));
+
+            // Breslow baseline cumulative hazard at each observed time
+            // Lambda0(t_i) = sum_{t_l <= t_i, event_l=1} 1 / (sum_{t_m >= t_l} exp(lp_m))
+            const cumHaz0 = new Array(n).fill(0);
+            let runningCumHaz = 0;
+
+            for (let idx = 0; idx < n; idx++) {
+                const i = order[idx];
+
+                if (events[i]) {
+                    // Risk set sum: all subjects still at risk at time t_i
+                    let riskSum = 0;
+                    for (let idx2 = idx; idx2 < n; idx2++) {
+                        riskSum += expLp[order[idx2]];
+                    }
+                    if (riskSum > 1e-10) {
+                        runningCumHaz += 1 / riskSum;
+                    }
+                }
+
+                cumHaz0[i] = runningCumHaz;
             }
 
-            // M-step: update theta from dispersion of posterior frailties
-            const meanW = frailtyW.reduce((a, b) => a + b, 0) / k;
-            const varW = frailtyW.reduce((sum, w) => sum + (w - meanW) ** 2, 0) / (k - 1);
-            const newTheta = Math.max(0, varW);
+            // Predicted hazard and martingale residuals per observation
+            const predictedHaz = new Array(n);
+            const martingaleResid = new Array(n);
+            for (let i = 0; i < n; i++) {
+                predictedHaz[i] = cumHaz0[i] * expLp[i];
+                martingaleResid[i] = (events[i] ? 1 : 0) - predictedHaz[i];
+            }
+
+            // -----------------------------------------------------------------
+            // E-step: compute study-level residual R_j and posterior frailty
+            // R_j = sum(martingale residuals for patients in study j)
+            // u_j = R_j / (n_j + 1/sigma2_u0)   [shrinkage toward 0]
+            // v_j = 1 / (n_j + 1/sigma2_u0)      [posterior variance]
+            // -----------------------------------------------------------------
+            const Rj = new Array(k).fill(0);
+            for (let i = 0; i < n; i++) {
+                Rj[studyMap[i]] += martingaleResid[i];
+            }
+
+            const invSigma2 = sigma2_u0 > 1e-10 ? 1 / sigma2_u0 : 1e10;
+            for (let j = 0; j < k; j++) {
+                const denom = nj[j] + invSigma2;
+                u[j] = Rj[j] / denom;
+                v[j] = 1 / denom;
+            }
+
+            // -----------------------------------------------------------------
+            // M-step: sigma2_u0 = (1/k) * sum(u_j^2 + v_j)
+            // This is the marginal MLE update incorporating both the posterior
+            // mean and the posterior uncertainty of each frailty
+            // -----------------------------------------------------------------
+            let newSigma2 = 0;
+            for (let j = 0; j < k; j++) {
+                newSigma2 += u[j] * u[j] + v[j];
+            }
+            newSigma2 /= k;
+            // Clamp to non-negative (sigma2_u0 = 0 means no heterogeneity)
+            newSigma2 = Math.max(0, newSigma2);
 
             // Check convergence
-            if (Math.abs(newTheta - theta) < 1e-6) {
-                theta = newTheta;
+            if (Math.abs(newSigma2 - sigma2_u0) < 1e-6) {
+                sigma2_u0 = newSigma2;
                 break;
             }
-            theta = newTheta;
+            sigma2_u0 = newSigma2;
         }
 
+        // =====================================================================
         // Method-of-moments fallback if EM yields zero (e.g., few studies)
-        // Q-based: sigma2_u0 = max(0, (Q - (k-1)) / C)
-        if (k >= 2 && theta < 1e-10) {
+        // Uses DerSimonian-Laird estimator on study-specific log-HR proxies
+        // =====================================================================
+        if (k >= 2 && sigma2_u0 < 1e-10) {
             const studyEffects = this._computeStudySpecificCoxEffects(data, X, studies, studyMap, outcomeVar);
             if (studyEffects.length >= 2) {
                 const weights = studyEffects.map(s => 1 / (s.se * s.se));
@@ -471,32 +546,40 @@ class IPDMetaAnalysis {
                 const weightedMean = studyEffects.reduce((sum, s, i) => sum + weights[i] * s.estimate, 0) / sumW;
                 const Q = studyEffects.reduce((sum, s, i) => sum + weights[i] * Math.pow(s.estimate - weightedMean, 2), 0);
                 const C = sumW - weights.reduce((sum, w) => sum + w * w, 0) / sumW;
-                theta = Math.max(0, (Q - (k - 1)) / C);
+                sigma2_u0 = Math.max(0, (Q - (k - 1)) / C);
             }
         }
 
+        // =====================================================================
+        // Fixed effects SEs with frailty adjustment
+        // The naive information matrix (X'H X)^{-1} ignores the additional
+        // variability from the frailty. Inflate SEs by sqrt(1 + sigma2_u0)
+        // as a conservative sandwich-type correction.
+        // =====================================================================
         const { hessian } = this._coxScoreHessian(times, events, X, beta, order);
         const varMatrix = this._invertMatrix(hessian);
 
-        const varNames = Object.keys(X[0]).filter(kk => kk !== 'intercept');
+        // SE inflation factor: accounts for frailty-induced correlation within studies
+        const seInflation = Math.sqrt(1 + sigma2_u0);
+
         const fixedEffects = {};
         varNames.forEach((name, i) => {
             fixedEffects[name] = {
                 estimate: beta[i],
-                se: Math.sqrt(varMatrix[i][i])
+                se: Math.sqrt(varMatrix[i][i]) * seInflation
             };
         });
 
-        // BLUPs: posterior frailty deviations (log-frailty scale)
+        // BLUPs: posterior frailty estimates (already on log-hazard scale)
         const blups = studies.map((s, j) => ({
             study: s,
-            blup: Math.log(frailtyW[j]),
-            frailty: frailtyW[j]
+            blup: u[j],
+            frailty: Math.exp(u[j])
         }));
 
         return {
             fixedEffects,
-            sigma2_u0: theta, // Estimated frailty variance (gamma frailty)
+            sigma2_u0, // Estimated Gaussian frailty variance (between-study)
             sigma2_e: 1,
             blups,
             logLik: this._coxPartialLogLik(times, events, X, beta, order),
