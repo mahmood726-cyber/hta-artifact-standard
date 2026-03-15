@@ -825,7 +825,7 @@ class AdvancedMetaAnalysis {
         const nParams = X[0].length;
 
         if (rank < nParams) {
-            console.warn(`Model not fully estimable. Rank: ${rank}, Parameters: ${nParams}`);
+            // Model not fully estimable (rank < nParams)
         }
 
         // Estimate using GLS with tau²
@@ -1033,7 +1033,7 @@ class AdvancedMetaAnalysis {
                 type: r.modelType,
                 estimate: r.mu,
                 se: r.se,
-                tau2: r.tau2 || 0,
+                tau2: r.tau2 ?? 0,
                 logLikelihood: r.logLikelihood,
                 bic: r.bic,
                 posteriorProb: posteriorProbs[i]
@@ -1050,7 +1050,7 @@ class AdvancedMetaAnalysis {
     fixedEffect(data) {
         const yi = data.map(d => d.yi);
         const vi = data.map(d => d.vi);
-        const wi = vi.map(v => 1 / v);
+        const wi = vi.map(v => 1 / Math.max(v, 1e-10));
         const sumW = wi.reduce((a, b) => a + b, 0);
         const mu = wi.reduce((s, w, i) => s + w * yi[i], 0) / sumW;
         const se = Math.sqrt(1 / sumW);
@@ -1064,7 +1064,7 @@ class AdvancedMetaAnalysis {
         const method = options.method || 'DL';
 
         // Fixed effect estimate first
-        const wi = vi.map(v => 1 / v);
+        const wi = vi.map(v => 1 / Math.max(v, 1e-10));
         const sumW = wi.reduce((a, b) => a + b, 0);
         const muFE = wi.reduce((s, w, i) => s + w * yi[i], 0) / sumW;
 
@@ -1144,7 +1144,7 @@ class AdvancedMetaAnalysis {
     calculateLogLikelihood(data, result) {
         const yi = data.map(d => d.yi);
         const vi = data.map(d => d.vi);
-        const tau2 = result.tau2 || 0;
+        const tau2 = result.tau2 ?? 0;
         const mu = result.mu;
 
         let logLik = 0;
@@ -1739,7 +1739,7 @@ class AdvancedMetaAnalysis {
         let totalN = 0;
 
         for (let j = 0; j < p; j++) {
-            const tau2 = Math.max(0, Sigma?.[j]?.[j] || 0);
+            const tau2 = Math.max(0, Sigma?.[j]?.[j] ?? 0);
             const vars = [];
             for (let i = 0; i < V.length; i++) {
                 if ((outcomeIndex[i] ?? (i % p)) === j) vars.push(V[i]);
@@ -1907,7 +1907,7 @@ class AdvancedMetaAnalysis {
         if (k < 3) return { error: 'Emax model requires at least 3 dose levels' };
 
         // Initial parameter estimates
-        let E0 = effects[0] || 0;
+        let E0 = effects[0] ?? 0;
         let Emax = Math.max(...effects) - E0;
         let ED50 = doses[Math.floor(k / 2)] || 1;
 

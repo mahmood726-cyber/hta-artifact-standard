@@ -53,7 +53,6 @@ const memoryPool = MemoryPool ? new MemoryPool() : null;
 async function getEngine() {
     if (!engine) {
         if (!PerformanceEngine) {
-            console.warn('PerformanceEngine not available');
             return null;
         }
         engine = new PerformanceEngine();
@@ -300,7 +299,8 @@ const OptimizedAlgorithms = {
         const seHKSJ = Math.sqrt(varHKSJ);
 
         // Use t-distribution with HKSJ
-        const tCrit = useHKSJ ? FastMath.tQuantile(0.975, n - 1) : 1.96;
+        const zCrit = FastMath.normQuantile(0.975);
+        const tCrit = useHKSJ ? FastMath.tQuantile(0.975, n - 1) : zCrit;
         const finalSE = useHKSJ ? seHKSJ : se;
 
         if (memoryPool) {
@@ -330,7 +330,7 @@ const OptimizedAlgorithms = {
             df: n - 1,
             pQ: 1 - FastMath.chiSquaredCDF(Q, n - 1),
             ci: [theta - tCrit * finalSE, theta + tCrit * finalSE],
-            ciStandard: [theta - 1.96 * se, theta + 1.96 * se],
+            ciStandard: [theta - zCrit * se, theta + zCrit * se],
             predictionInterval,
             hksjFactor: qHKSJ,
             k: n,
@@ -348,8 +348,9 @@ const OptimizedAlgorithms = {
         if (Q > df) {
             const B = 0.5 * Math.log(Q / df);
             const seB = Math.sqrt(0.5 / df);
-            const BLower = B - 1.96 * seB;
-            const BUpper = B + 1.96 * seB;
+            const zCritI2 = FastMath.normQuantile(1 - alpha / 2);
+            const BLower = B - zCritI2 * seB;
+            const BUpper = B + zCritI2 * seB;
             lower = Math.max(0, (1 - Math.exp(-2 * BLower)) * 100);
             upper = Math.min(100, (1 - Math.exp(-2 * BUpper)) * 100);
         }
@@ -448,7 +449,8 @@ const OptimizedAlgorithms = {
         const varHKSJ = varTheta * qHKSJ;
         const seHKSJ = Math.sqrt(varHKSJ);
 
-        const tCrit = useHKSJ ? FastMath.tQuantile(0.975, n - 1) : 1.96;
+        const zCritREML = FastMath.normQuantile(0.975);
+        const tCrit = useHKSJ ? FastMath.tQuantile(0.975, n - 1) : zCritREML;
         const finalSE = useHKSJ ? seHKSJ : se;
 
         // Calculate Q for I²
@@ -473,7 +475,7 @@ const OptimizedAlgorithms = {
             df: n - 1,
             pQ: 1 - FastMath.chiSquaredCDF(Q, n - 1),
             ci: [theta - tCrit * finalSE, theta + tCrit * finalSE],
-            ciStandard: [theta - 1.96 * se, theta + 1.96 * se],
+            ciStandard: [theta - zCritREML * se, theta + zCritREML * se],
             predictionInterval,
             hksjFactor: qHKSJ,
             k: n,
@@ -529,15 +531,16 @@ const OptimizedAlgorithms = {
 
                 // Log-log confidence interval (more stable) - avoid division by zero when survProb = 1
                 const logSurv = Math.log(survProb);
+                const zCritKM = FastMath.normQuantile(0.975);
                 let ciLower, ciUpper;
                 if (Math.abs(logSurv) > 1e-10) {
                     const logLogSE = Math.sqrt(varSum) / Math.abs(logSurv);
-                    ciLower = Math.pow(survProb, Math.exp(1.96 * logLogSE));
-                    ciUpper = Math.pow(survProb, Math.exp(-1.96 * logLogSE));
+                    ciLower = Math.pow(survProb, Math.exp(zCritKM * logLogSE));
+                    ciUpper = Math.pow(survProb, Math.exp(-zCritKM * logLogSE));
                 } else {
                     // Fallback to Wald CI when survProb is very close to 1
-                    ciLower = Math.max(0, survProb - 1.96 * se);
-                    ciUpper = Math.min(1, survProb + 1.96 * se);
+                    ciLower = Math.max(0, survProb - zCritKM * se);
+                    ciUpper = Math.min(1, survProb + zCritKM * se);
                 }
 
                 result.times.push(t);
@@ -653,7 +656,7 @@ function accelerate(BaseClass) {
             const cached = this._getFromCache(cacheKey);
             if (cached) return cached;
 
-            const effects = new Float64Array(data.map(d => d.effect || d.yi || 0));
+            const effects = new Float64Array(data.map(d => d.effect ?? d.yi ?? 0));
             const variances = new Float64Array(data.map(d => d.variance || d.vi || 1));
 
             let result;
@@ -687,7 +690,6 @@ function accelerate(BaseClass) {
                 return engine.psa(params, nSim, options.seed);
             }
             // Fallback PSA
-            console.warn('PSA engine not available');
             return null;
         }
 

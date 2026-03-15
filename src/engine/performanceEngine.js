@@ -389,7 +389,7 @@ const FallbackExecutor = {
                         value = p.min + (p.max - p.min) * random();
                         break;
                     default:
-                        value = p.mean || 0;
+                        value = p.mean ?? 0;
                 }
                 samples[i * nParams + j] = value;
             }
@@ -1085,7 +1085,7 @@ class WorkerPoolManager {
                                     value = p.min + (p.max - p.min) * this.random();
                                     break;
                                 default:
-                                    value = p.mean || 0;
+                                    value = p.mean ?? 0;
                             }
                             samples[i * nParams + j] = value;
                         }
@@ -1505,7 +1505,6 @@ class WorkerPoolManager {
             try {
                 return URL.createObjectURL(new Blob([workerCode], { type: 'application/javascript' }));
             } catch (e) {
-                console.warn('Failed to create worker blob:', e);
                 return null;
             }
         }
@@ -1517,7 +1516,6 @@ class WorkerPoolManager {
 
         // Check if we're in fallback mode (no WebWorkers available)
         if (this.fallbackMode) {
-            console.log('WebWorkers not available, using fallback mode');
             this.initialized = true;
             return;
         }
@@ -1528,7 +1526,6 @@ class WorkerPoolManager {
         }
 
         if (!this.workerScript) {
-            console.warn('Failed to generate worker script, using fallback mode');
             this.fallbackMode = true;
             this.initialized = true;
             return;
@@ -1542,14 +1539,12 @@ class WorkerPoolManager {
 
                 // Add error handler
                 worker.onerror = (e) => {
-                    console.error(`Worker ${i} error:`, e);
                     worker.busy = false;
                 };
 
                 this.workers.push(worker);
             }
         } catch (e) {
-            console.warn('Failed to initialize workers:', e);
             this.fallbackMode = true;
         }
 
@@ -1654,7 +1649,6 @@ class WASMAccelerator {
         if (this.initialized) return;
 
         if (this.fallbackMode) {
-            console.log('WebAssembly not available, using JS fallback');
             this.initialized = true;
             return;
         }
@@ -1664,9 +1658,7 @@ class WASMAccelerator {
             // WASM binary generation is complex and error-prone in pure JS
             // For production, use a proper WASM toolchain (e.g., Emscripten, Rust wasm-bindgen)
             this.initialized = true;
-            console.log('WASM accelerator initialized (using optimized JS fallback)');
         } catch (e) {
-            console.warn('WASM initialization failed, falling back to JS:', e);
             this.fallbackMode = true;
             this.initialized = true;
         }
@@ -1738,7 +1730,6 @@ class GPUAccelerator {
         if (this.fallbackMode) {
             this.backend = 'cpu';
             this.initialized = true;
-            console.log('GPU acceleration not available, using CPU fallback');
             return;
         }
 
@@ -1754,7 +1745,7 @@ class GPUAccelerator {
                     return;
                 }
             } catch (e) {
-                console.warn('WebGPU initialization failed:', e);
+                // WebGPU initialization failed, try WebGL
             }
         }
 
@@ -1770,7 +1761,7 @@ class GPUAccelerator {
                     return;
                 }
             } catch (e) {
-                console.warn('WebGL initialization failed:', e);
+                // WebGL initialization failed, fall back to CPU
             }
         }
 
@@ -1778,7 +1769,6 @@ class GPUAccelerator {
         this.backend = 'cpu';
         this.fallbackMode = true;
         this.initialized = true;
-        console.log('GPU not available, using CPU fallback');
     }
 
     async _initWebGPU() {
@@ -2436,12 +2426,6 @@ class PerformanceEngine {
         ]);
 
         this.initialized = true;
-        console.log('PerformanceEngine initialized:', {
-            workers: this.workerPool.poolSize,
-            wasm: this.wasm.initialized,
-            gpu: this.gpu.initialized,
-            gpuBackend: this.gpu.backend
-        });
     }
 
     // High-level optimized operations

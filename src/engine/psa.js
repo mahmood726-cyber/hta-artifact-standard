@@ -844,7 +844,7 @@ class PSAEngine {
                 );
 
             default:
-                console.warn(`Unknown distribution type: ${dist.type}`);
+                // Unknown distribution type, returning base value
                 return baseValue;
         }
     }
@@ -1281,34 +1281,38 @@ class DSAEngine {
                 const mean = alpha / (alpha + beta);
                 const variance = (alpha * beta) / ((alpha + beta) ** 2 * (alpha + beta + 1));
                 const sd = Math.sqrt(variance);
+                const z = this.normalInverseCDF(0.975);
                 return {
-                    low: Math.max(0, mean - 1.96 * sd),
-                    high: Math.min(1, mean + 1.96 * sd)
+                    low: Math.max(0, mean - z * sd),
+                    high: Math.min(1, mean + z * sd)
                 };
             }
             case 'gamma': {
                 const mean = dist.mean || baseValue;
                 const se = dist.se || dist.sd || mean * 0.1;
+                const z = this.normalInverseCDF(0.975);
                 return {
-                    low: Math.max(0, mean - 1.96 * se),
-                    high: mean + 1.96 * se
+                    low: Math.max(0, mean - z * se),
+                    high: mean + z * se
                 };
             }
             case 'normal':
             case 'gaussian': {
                 const mean = dist.mean || baseValue;
                 const sd = dist.sd || dist.se || mean * 0.1;
+                const z = this.normalInverseCDF(0.975);
                 return {
-                    low: mean - 1.96 * sd,
-                    high: mean + 1.96 * sd
+                    low: mean - z * sd,
+                    high: mean + z * sd
                 };
             }
             case 'lognormal': {
                 const mean = dist.mean || baseValue;
                 const sd = dist.sd || dist.se || mean * 0.3;
+                const z = this.normalInverseCDF(0.975);
                 return {
-                    low: Math.max(0, mean - 1.96 * sd),
-                    high: mean + 1.96 * sd
+                    low: Math.max(0, mean - z * sd),
+                    high: mean + z * sd
                 };
             }
             case 'uniform': {

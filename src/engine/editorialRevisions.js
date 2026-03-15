@@ -164,8 +164,9 @@ class HKSJMetaAnalysis {
             // Based on uncertainty in Q
             const B = 0.5 * Math.log(Q / df);
             const seB = Math.sqrt(0.5 / df);
-            const BLower = B - 1.96 * seB;
-            const BUpper = B + 1.96 * seB;
+            const zCrit = this._normalQuantile(1 - this.alpha / 2);
+            const BLower = B - zCrit * seB;
+            const BUpper = B + zCrit * seB;
 
             lower = Math.max(0, (1 - Math.exp(-2 * BLower)) * 100);
             upper = Math.min(100, (1 - Math.exp(-2 * BUpper)) * 100);
@@ -251,7 +252,7 @@ class HKSJMetaAnalysis {
         return {
             effect,
             se,
-            ci: [effect - 1.96 * se, effect + 1.96 * se],
+            ci: [effect - this._normalQuantile(1 - this.alpha / 2) * se, effect + this._normalQuantile(1 - this.alpha / 2) * se],
             tau2: 0,
             I2: 0,
             I2CI: { lower: 0, upper: 0 },
@@ -521,7 +522,7 @@ class EVPPICalculator {
             case 'uniform':
                 return min + this.rng() * (max - min);
             default:
-                return this._sampleNormal(mean || 0, se || 1);
+                return this._sampleNormal(mean ?? 0, se ?? 1);
         }
     }
 
@@ -625,7 +626,7 @@ class PriorSensitivityAnalysis {
     _samplePosterior(likelihoodFn, priorSpec, data) {
         // Simple Metropolis-Hastings
         const samples = [];
-        let current = priorSpec.initial || priorSpec.params.mean || 0;
+        let current = priorSpec.initial ?? priorSpec.params.mean ?? 0;
         let currentLogPost = likelihoodFn(current, data) + this._logPrior(current, priorSpec);
 
         const proposalSD = priorSpec.proposalSD || priorSpec.params.sd || 1;
@@ -959,7 +960,7 @@ class SurvivalModelSelection {
                 time: t,
                 survival: S,
                 se,
-                ci: [Math.max(0, S - 1.96 * se), Math.min(1, S + 1.96 * se)]
+                ci: [Math.max(0, S - this._normalQuantile(0.975) * se), Math.min(1, S + this._normalQuantile(0.975) * se)]
             };
         });
 
@@ -1040,8 +1041,8 @@ class SurvivalModelSelection {
                 survival: avgSurvival,
                 se: Math.sqrt(varSurvival),
                 ci: [
-                    Math.max(0, avgSurvival - 1.96 * Math.sqrt(varSurvival)),
-                    Math.min(1, avgSurvival + 1.96 * Math.sqrt(varSurvival))
+                    Math.max(0, avgSurvival - this._normalQuantile(0.975) * Math.sqrt(varSurvival)),
+                    Math.min(1, avgSurvival + this._normalQuantile(0.975) * Math.sqrt(varSurvival))
                 ]
             };
         });
@@ -1055,6 +1056,35 @@ class SurvivalModelSelection {
         const t = 1.0 / (1.0 + p * x);
         const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
         return 0.5 * (1.0 + sign * y);
+    }
+
+    _normalQuantile(p) {
+        const a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+            -2.759285104469687e+02, 1.383577518672690e+02,
+            -3.066479806614716e+01, 2.506628277459239e+00];
+        const b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+            -1.556989798598866e+02, 6.680131188771972e+01, -1.328068155288572e+01];
+        const c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+            -2.400758277161838e+00, -2.549732539343734e+00,
+            4.374664141464968e+00, 2.938163982698783e+00];
+        const d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+            2.445134137142996e+00, 3.754408661907416e+00];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[1]*q+c[2])*q+c[3])*q+c[4])*q+c[5])*q+c[6]) /
+                   ((((d[1]*q+d[2])*q+d[3])*q+d[4])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5;
+            r = q * q;
+            return (((((a[1]*r+a[2])*r+a[3])*r+a[4])*r+a[5])*r+a[6])*q /
+                   (((((b[1]*r+b[2])*r+b[3])*r+b[4])*r+b[5])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[1]*q+c[2])*q+c[3])*q+c[4])*q+c[5])*q+c[6]) /
+                    ((((d[1]*q+d[2])*q+d[3])*q+d[4])*q+1);
+        }
     }
 
     _gammaCDF(shape, x) {
@@ -1093,6 +1123,7 @@ class NetworkMetaAnalysis {
         this.method = options.method || 'frequentist'; // 'frequentist' or 'bayesian'
         this.maxIter = options.maxIter || 1000;
         this.tol = options.tol || 1e-6;
+        this._rngState = options.seed ?? 12345;
     }
 
     /**
@@ -1237,7 +1268,7 @@ class NetworkMetaAnalysis {
                 pairwise[`${t1} vs ${t2}`] = {
                     effect: diff,
                     se,
-                    ci: [diff - 1.96 * se, diff + 1.96 * se],
+                    ci: [diff - this._normalQuantile(0.975) * se, diff + this._normalQuantile(0.975) * se],
                     pValue: 2 * (1 - this._normalCDF(Math.abs(diff / se)))
                 };
             }
@@ -1525,6 +1556,40 @@ class NetworkMetaAnalysis {
         return 0.5 * (1.0 + sign * y);
     }
 
+    _normalQuantile(p) {
+        const a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+            -2.759285104469687e+02, 1.383577518672690e+02,
+            -3.066479806614716e+01, 2.506628277459239e+00];
+        const b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+            -1.556989798598866e+02, 6.680131188771972e+01, -1.328068155288572e+01];
+        const c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+            -2.400758277161838e+00, -2.549732539343734e+00,
+            4.374664141464968e+00, 2.938163982698783e+00];
+        const d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+            2.445134137142996e+00, 3.754408661907416e+00];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[1]*q+c[2])*q+c[3])*q+c[4])*q+c[5])*q+c[6]) /
+                   ((((d[1]*q+d[2])*q+d[3])*q+d[4])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5;
+            r = q * q;
+            return (((((a[1]*r+a[2])*r+a[3])*r+a[4])*r+a[5])*r+a[6])*q /
+                   (((((b[1]*r+b[2])*r+b[3])*r+b[4])*r+b[5])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[1]*q+c[2])*q+c[3])*q+c[4])*q+c[5])*q+c[6]) /
+                    ((((d[1]*q+d[2])*q+d[3])*q+d[4])*q+1);
+        }
+    }
+
+    _seededRandom() {
+        this._rngState = (this._rngState * 1103515245 + 12345) & 0x7fffffff;
+        return this._rngState / 0x7fffffff || 1e-10;
+    }
+
     _chiSquareCDF(x, df) {
         if (x <= 0) return 0;
         return this._gammainc(df / 2, x / 2);
@@ -1572,8 +1637,8 @@ class NetworkMetaAnalysis {
     }
 
     _sampleNormal(mean, sd) {
-        const u1 = Math.max(1e-10, Math.random());
-        const u2 = Math.random();
+        const u1 = Math.max(1e-10, this._seededRandom());
+        const u2 = this._seededRandom();
         const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
         return mean + sd * z;
     }
@@ -1813,10 +1878,11 @@ class PublicationBiasTests {
             yValues.push(se);
         }
 
+        const zCrit = this._normalQuantile(1 - this.alpha / 2);
         const funnelBounds = yValues.map(se => ({
             se,
-            lower: pooled - 1.96 * se,
-            upper: pooled + 1.96 * se
+            lower: pooled - zCrit * se,
+            upper: pooled + zCrit * se
         }));
 
         return {
@@ -1863,6 +1929,35 @@ class PublicationBiasTests {
         const t = 1.0 / (1.0 + p * x);
         const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
         return 0.5 * (1.0 + sign * y);
+    }
+
+    _normalQuantile(p) {
+        const a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+            -2.759285104469687e+02, 1.383577518672690e+02,
+            -3.066479806614716e+01, 2.506628277459239e+00];
+        const b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+            -1.556989798598866e+02, 6.680131188771972e+01, -1.328068155288572e+01];
+        const c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+            -2.400758277161838e+00, -2.549732539343734e+00,
+            4.374664141464968e+00, 2.938163982698783e+00];
+        const d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+            2.445134137142996e+00, 3.754408661907416e+00];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[1]*q+c[2])*q+c[3])*q+c[4])*q+c[5])*q+c[6]) /
+                   ((((d[1]*q+d[2])*q+d[3])*q+d[4])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5;
+            r = q * q;
+            return (((((a[1]*r+a[2])*r+a[3])*r+a[4])*r+a[5])*r+a[6])*q /
+                   (((((b[1]*r+b[2])*r+b[3])*r+b[4])*r+b[5])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[1]*q+c[2])*q+c[3])*q+c[4])*q+c[5])*q+c[6]) /
+                    ((((d[1]*q+d[2])*q+d[3])*q+d[4])*q+1);
+        }
     }
 
     _tCDF(x, df) {
@@ -2034,7 +2129,7 @@ class PublicationBiasTests {
         return {
             effect,
             se,
-            ci: [effect - 1.96 * se, effect + 1.96 * se],
+            ci: [effect - this._normalQuantile(1 - this.alpha / 2) * se, effect + this._normalQuantile(1 - this.alpha / 2) * se],
             tau2
         };
     }

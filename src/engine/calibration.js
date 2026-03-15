@@ -813,7 +813,7 @@ class CalibrationEngine {
                 percentError: predicted !== null ?
                     ((predicted - target.observed) / target.observed * 100) : null,
                 withinCI: predicted !== null ?
-                    Math.abs(predicted - target.observed) <= 1.96 * target.se : null
+                    Math.abs(predicted - target.observed) <= StatUtils.normalInverseCDF(0.975) * target.se : null
             });
         }
 

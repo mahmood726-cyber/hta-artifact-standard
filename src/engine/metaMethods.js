@@ -1310,14 +1310,15 @@ class MetaAnalysisMethods {
         const seBeta = XtWXinv.map((row, i) => Math.sqrt(row[i]));
 
         // Build coefficient table
+        const zCritMR = this.normalQuantile(1 - this.options.alpha / 2);
         const coefficients = [{
             name: 'Intercept',
             estimate: beta[0],
             se: seBeta[0],
             z: beta[0] / seBeta[0],
             pValue: 2 * (1 - this.normalCDF(Math.abs(beta[0] / seBeta[0]))),
-            ci_lower: beta[0] - 1.96 * seBeta[0],
-            ci_upper: beta[0] + 1.96 * seBeta[0]
+            ci_lower: beta[0] - zCritMR * seBeta[0],
+            ci_upper: beta[0] + zCritMR * seBeta[0]
         }];
 
         let idx = 1;
@@ -1329,8 +1330,8 @@ class MetaAnalysisMethods {
                     se: seBeta[idx],
                     z: beta[idx] / seBeta[idx],
                     pValue: 2 * (1 - this.normalCDF(Math.abs(beta[idx] / seBeta[idx]))),
-                    ci_lower: beta[idx] - 1.96 * seBeta[idx],
-                    ci_upper: beta[idx] + 1.96 * seBeta[idx]
+                    ci_lower: beta[idx] - zCritMR * seBeta[idx],
+                    ci_upper: beta[idx] + zCritMR * seBeta[idx]
                 });
                 idx++;
             } else {
@@ -1342,8 +1343,8 @@ class MetaAnalysisMethods {
                         se: seBeta[idx],
                         z: beta[idx] / seBeta[idx],
                         pValue: 2 * (1 - this.normalCDF(Math.abs(beta[idx] / seBeta[idx]))),
-                        ci_lower: beta[idx] - 1.96 * seBeta[idx],
-                        ci_upper: beta[idx] + 1.96 * seBeta[idx]
+                        ci_lower: beta[idx] - zCritMR * seBeta[idx],
+                        ci_upper: beta[idx] + zCritMR * seBeta[idx]
                     });
                     idx++;
                 }

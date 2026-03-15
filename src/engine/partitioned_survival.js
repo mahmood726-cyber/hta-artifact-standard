@@ -198,7 +198,7 @@ class PartitionedSurvivalEngine {
                 return (t) => this.genGammaSurvival(t, params.mu, params.sigma, params.Q, hr);
 
             default:
-                console.warn(`Unknown distribution: ${distribution}, using Weibull`);
+                // Unknown distribution, falling back to Weibull
                 return (t) => this.weibullSurvival(t, params.scale || 24, params.shape || 1, hr);
         }
     }

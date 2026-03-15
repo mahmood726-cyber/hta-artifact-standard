@@ -22,6 +22,15 @@ class EVPPICalculator {
             bootstrapIterations: 100,  // For SE estimation
             ...options
         };
+        this._rngState = options.seed || 12345;
+    }
+
+    /**
+     * LCG seeded PRNG for reproducible bootstrap sampling
+     */
+    _seededRandom() {
+        this._rngState = (this._rngState * 1103515245 + 12345) & 0x7fffffff;
+        return this._rngState / 0x7fffffff || 1e-10;
     }
 
     /**
@@ -79,8 +88,8 @@ class EVPPICalculator {
             wtp: wtp,
             evppiPerPatient: Math.max(0, evppiPerPatient),
             standardError: seEstimate,
-            ci_lower: Math.max(0, evppiPerPatient - 1.96 * seEstimate),
-            ci_upper: evppiPerPatient + 1.96 * seEstimate,
+            ci_lower: Math.max(0, evppiPerPatient - StatUtils.normalInverseCDF(0.975) * seEstimate),
+            ci_upper: evppiPerPatient + StatUtils.normalInverseCDF(0.975) * seEstimate,
             baselineNMB: meanNMB,
             optimalWithCurrentInfo: meanNMB > 0 ? 'Intervention' : 'Comparator',
             rSquared: this.calculateRSquared(nmb, fittedValues),
@@ -425,7 +434,7 @@ class EVPPICalculator {
             // Bootstrap sample
             const indices = [];
             for (let i = 0; i < n; i++) {
-                indices.push(Math.floor(Math.random() * n));
+                indices.push(Math.floor(this._seededRandom() * n));
             }
 
             const Xb = indices.map(i => X[i]);

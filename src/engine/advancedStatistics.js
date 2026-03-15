@@ -139,16 +139,23 @@ class EVSICalculator {
 
         switch (type) {
             case 'beta': {
+                if (se <= 0 || mean <= 0 || mean >= 1) {
+                    return mean; // fallback to point estimate
+                }
                 const alpha = mean * ((mean * (1 - mean)) / (se * se) - 1);
                 const beta = (1 - mean) * ((mean * (1 - mean)) / (se * se) - 1);
+                if (alpha <= 0 || beta <= 0) return mean; // invalid params, fallback
                 return this._sampleBeta(alpha, beta);
             }
             case 'gamma': {
+                if (se <= 0 || mean <= 0) return mean;
                 const shape = (mean / se) ** 2;
                 const scale = (se ** 2) / mean;
+                if (shape <= 0 || scale <= 0) return mean;
                 return this._sampleGamma(shape, scale);
             }
             case 'lognormal': {
+                if (mean <= 0 || se <= 0) return mean;
                 const mu = Math.log(mean) - 0.5 * Math.log(1 + (se / mean) ** 2);
                 const sigma = Math.sqrt(Math.log(1 + (se / mean) ** 2));
                 return Math.exp(this._sampleNormal(mu, sigma));
@@ -178,12 +185,14 @@ class EVSICalculator {
 
     _updatePrior(prior, data, n) {
         // Conjugate Bayesian update for normal-normal
-        const priorPrecision = 1 / (prior.se ** 2);
-        const dataPrecision = n / (data.se ** 2 * n);
+        const priorPrecision = prior.se > 0 ? 1 / (prior.se ** 2) : 0;
+        const dataPrecision = data.se > 0 ? 1 / (data.se ** 2) : 0;
 
         const posteriorPrecision = priorPrecision + dataPrecision;
-        const posteriorMean = (prior.mean * priorPrecision + data.mean * dataPrecision) / posteriorPrecision;
-        const posteriorSE = Math.sqrt(1 / posteriorPrecision);
+        const posteriorMean = posteriorPrecision > 0
+            ? (prior.mean * priorPrecision + data.mean * dataPrecision) / posteriorPrecision
+            : prior.mean;
+        const posteriorSE = posteriorPrecision > 0 ? Math.sqrt(1 / posteriorPrecision) : prior.se;
 
         return {
             mean: posteriorMean,

@@ -75,8 +75,8 @@ class IPDMetaAnalysis {
                 estimate: treatmentEffect.estimate,
                 se: treatmentEffect.se,
                 ci95: [
-                    treatmentEffect.estimate - 1.96 * treatmentEffect.se,
-                    treatmentEffect.estimate + 1.96 * treatmentEffect.se
+                    treatmentEffect.estimate - this._normalQuantile(0.975) * treatmentEffect.se,
+                    treatmentEffect.estimate + this._normalQuantile(0.975) * treatmentEffect.se
                 ],
                 pValue: 2 * (1 - this._normalCDF(Math.abs(treatmentEffect.estimate / treatmentEffect.se)))
             },
@@ -685,7 +685,7 @@ class IPDMetaAnalysis {
             mu,
             se,
             tau2,
-            ci95: [mu - 1.96 * se, mu + 1.96 * se],
+            ci95: [mu - this._normalQuantile(0.975) * se, mu + this._normalQuantile(0.975) * se],
             pValue: 2 * (1 - this._normalCDF(Math.abs(mu / se)))
         };
     }
@@ -878,6 +878,32 @@ class IPDMetaAnalysis {
         return 0.5 * (1 + sign * y);
     }
 
+    _normalQuantile(p) {
+        const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+                   1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+        const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+                   6.680131188771972e1, -1.328068155288572e1];
+        const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
+                   -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+        const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0,
+                   3.754408661907416e0];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5; r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
+    }
+
     _chiSquareCDF(x, df) {
         return this._gammaCDF(x / 2, df / 2);
     }
@@ -994,15 +1020,15 @@ class DTAMetaAnalysis {
                 sensitivity: {
                     estimate: pooledSe,
                     ci95: [
-                        1 / (1 + Math.exp(-(result.mu1 - 1.96 * seLogitSe))),
-                        1 / (1 + Math.exp(-(result.mu1 + 1.96 * seLogitSe)))
+                        1 / (1 + Math.exp(-(result.mu1 - this._normalQuantile(0.975) * seLogitSe))),
+                        1 / (1 + Math.exp(-(result.mu1 + this._normalQuantile(0.975) * seLogitSe)))
                     ]
                 },
                 specificity: {
                     estimate: pooledSp,
                     ci95: [
-                        1 / (1 + Math.exp(-(result.mu2 - 1.96 * seLogitSp))),
-                        1 / (1 + Math.exp(-(result.mu2 + 1.96 * seLogitSp)))
+                        1 / (1 + Math.exp(-(result.mu2 - this._normalQuantile(0.975) * seLogitSp))),
+                        1 / (1 + Math.exp(-(result.mu2 + this._normalQuantile(0.975) * seLogitSp)))
                     ]
                 },
                 correlation: correlation
@@ -1130,11 +1156,13 @@ class DTAMetaAnalysis {
                 // Difference in sensitivity
                 const diffSe = testResult.pooledEstimates.sensitivity.estimate -
                               refResult.pooledEstimates.sensitivity.estimate;
+                const zCrit = this._normalQuantile(0.975);
+                const zCrit2 = zCrit * zCrit;
                 const seDiffSe = Math.sqrt(
                     Math.pow(testResult.pooledEstimates.sensitivity.ci95[1] -
-                            testResult.pooledEstimates.sensitivity.estimate, 2) / 3.84 +
+                            testResult.pooledEstimates.sensitivity.estimate, 2) / zCrit2 +
                     Math.pow(refResult.pooledEstimates.sensitivity.ci95[1] -
-                            refResult.pooledEstimates.sensitivity.estimate, 2) / 3.84
+                            refResult.pooledEstimates.sensitivity.estimate, 2) / zCrit2
                 );
 
                 // Difference in specificity
@@ -1142,21 +1170,21 @@ class DTAMetaAnalysis {
                               refResult.pooledEstimates.specificity.estimate;
                 const seDiffSp = Math.sqrt(
                     Math.pow(testResult.pooledEstimates.specificity.ci95[1] -
-                            testResult.pooledEstimates.specificity.estimate, 2) / 3.84 +
+                            testResult.pooledEstimates.specificity.estimate, 2) / zCrit2 +
                     Math.pow(refResult.pooledEstimates.specificity.ci95[1] -
-                            refResult.pooledEstimates.specificity.estimate, 2) / 3.84
+                            refResult.pooledEstimates.specificity.estimate, 2) / zCrit2
                 );
 
                 comparisons.push({
                     comparison: `${test} vs ${reference}`,
                     diffSensitivity: {
                         estimate: diffSe,
-                        ci95: [diffSe - 1.96 * seDiffSe, diffSe + 1.96 * seDiffSe],
+                        ci95: [diffSe - zCrit * seDiffSe, diffSe + zCrit * seDiffSe],
                         pValue: 2 * (1 - this._normalCDF(Math.abs(diffSe / seDiffSe)))
                     },
                     diffSpecificity: {
                         estimate: diffSp,
-                        ci95: [diffSp - 1.96 * seDiffSp, diffSp + 1.96 * seDiffSp],
+                        ci95: [diffSp - zCrit * seDiffSp, diffSp + zCrit * seDiffSp],
                         pValue: 2 * (1 - this._normalCDF(Math.abs(diffSp / seDiffSp)))
                     }
                 });
@@ -1278,6 +1306,32 @@ class DTAMetaAnalysis {
         const y = 1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
         return 0.5 * (1 + sign * y);
     }
+
+    _normalQuantile(p) {
+        const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+                   1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+        const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+                   6.680131188771972e1, -1.328068155288572e1];
+        const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
+                   -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+        const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0,
+                   3.754408661907416e0];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5; r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
+    }
 }
 
 
@@ -1396,7 +1450,7 @@ class AdvancedPublicationBias {
         const averagedEffect = modelResults.reduce((sum, r, i) =>
             sum + posteriorModelProbs[i] * r.effectEstimate, 0);
         const averagedTau = modelResults.reduce((sum, r, i) =>
-            sum + posteriorModelProbs[i] * (r.tau || 0), 0);
+            sum + posteriorModelProbs[i] * (r.tau ?? 0), 0);
 
         // Posterior probability of H1 (effect exists)
         const probH1 = models.reduce((sum, m, i) =>
@@ -1525,7 +1579,7 @@ class AdvancedPublicationBias {
             standardEstimate: {
                 effect: standard.mu,
                 se: standard.se,
-                ci95: [standard.mu - 1.96 * standard.se, standard.mu + 1.96 * standard.se]
+                ci95: [standard.mu - this._normalQuantile(0.975) * standard.se, standard.mu + this._normalQuantile(0.975) * standard.se]
             },
             sensitivityAnalysis: {
                 adjustedForSelection,
@@ -1685,13 +1739,14 @@ class AdvancedPublicationBias {
         const mu = effects.reduce((sum, y, i) => sum + adjWeights[i] * y, 0) / sumW;
         const se = Math.sqrt(1 / sumW);
 
-        return { mu, se, ci95: [mu - 1.96 * se, mu + 1.96 * se] };
+        const zCrit = this._normalQuantile(0.975);
+        return { mu, se, ci95: [mu - zCrit * se, mu + zCrit * se] };
     }
 
     _robustConfidenceInterval(effects, ses, pValues, cutoffs) {
         // Simplified robust CI
         const standard = this._randomEffectsMA(effects, ses);
-        const width = 1.96 * standard.se * 1.5; // Conservative widening
+        const width = this._normalQuantile(0.975) * standard.se * 1.5; // Conservative widening
         return [standard.mu - width, standard.mu + width];
     }
 
@@ -1714,7 +1769,7 @@ class AdvancedPublicationBias {
     _calculateEValue(effect, se, threshold) {
         // E-value calculation
         const rr = Math.exp(effect);
-        const ciLow = Math.exp(effect - 1.96 * se);
+        const ciLow = Math.exp(effect - this._normalQuantile(0.975) * se);
 
         const ePoint = rr + Math.sqrt(rr * (rr - 1));
         const eCI = ciLow + Math.sqrt(ciLow * (ciLow - 1));
@@ -1759,6 +1814,32 @@ class AdvancedPublicationBias {
 
     _normalPDF(x) {
         return Math.exp(-x * x / 2) / Math.sqrt(2 * Math.PI);
+    }
+
+    _normalQuantile(p) {
+        const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+                   1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+        const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+                   6.680131188771972e1, -1.328068155288572e1];
+        const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
+                   -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+        const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0,
+                   3.754408661907416e0];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5; r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
     }
 }
 
@@ -2490,7 +2571,7 @@ class MendelianRandomizationMA {
                 method: 'ivw-fixed',
                 estimate,
                 se,
-                ci95: [estimate - 1.96 * se, estimate + 1.96 * se],
+                ci95: [estimate - this._normalQuantile(0.975) * se, estimate + this._normalQuantile(0.975) * se],
                 pValue: 2 * (1 - this._normalCDF(Math.abs(estimate / se)))
             };
         } else {
@@ -2509,7 +2590,7 @@ class MendelianRandomizationMA {
                 method: 'ivw-random',
                 estimate: estimateFE,
                 se: seRE,
-                ci95: [estimateFE - 1.96 * seRE, estimateFE + 1.96 * seRE],
+                ci95: [estimateFE - this._normalQuantile(0.975) * seRE, estimateFE + this._normalQuantile(0.975) * seRE],
                 pValue: 2 * (1 - this._normalCDF(Math.abs(estimateFE / seRE))),
                 heterogeneity: {
                     Q,
@@ -2560,14 +2641,14 @@ class MendelianRandomizationMA {
             causalEstimate: {
                 estimate: slope,
                 se: seSlope,
-                ci95: [slope - 1.96 * seSlope, slope + 1.96 * seSlope],
+                ci95: [slope - this._normalQuantile(0.975) * seSlope, slope + this._normalQuantile(0.975) * seSlope],
                 pValue: 2 * (1 - this._normalCDF(Math.abs(slope / seSlope)))
             },
             pleiotropyTest: {
                 intercept,
                 se: seIntercept,
                 pValue: 2 * (1 - this._normalCDF(Math.abs(intercept / seIntercept))),
-                interpretation: Math.abs(intercept) > 1.96 * seIntercept ?
+                interpretation: Math.abs(intercept) > this._normalQuantile(0.975) * seIntercept ?
                     'Evidence of directional pleiotropy' : 'No evidence of directional pleiotropy'
             },
             I2NOME: I2NOME,
@@ -2635,7 +2716,7 @@ class MendelianRandomizationMA {
             method: 'weighted-median',
             estimate,
             se,
-            ci95: [estimate - 1.96 * se, estimate + 1.96 * se],
+            ci95: [estimate - this._normalQuantile(0.975) * se, estimate + this._normalQuantile(0.975) * se],
             pValue: 2 * (1 - this._normalCDF(Math.abs(estimate / se))),
             robustness: 'Valid if ≥50% of weight from valid instruments'
         };
@@ -2779,9 +2860,41 @@ class MendelianRandomizationMA {
         return Math.sqrt(2 * Math.PI) * Math.pow(t, z + 0.5) * Math.exp(-t) * x;
     }
 
+    _normalQuantile(p) {
+        const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+                   1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+        const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+                   6.680131188771972e1, -1.328068155288572e1];
+        const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
+                   -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+        const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0,
+                   3.754408661907416e0];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5; r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
+    }
+
+    _seededRandom() {
+        this._rngState = (this._rngState * 1103515245 + 12345) & 0x7fffffff;
+        return this._rngState / 0x7fffffff || 1e-10;
+    }
+
     _randomNormal() {
-        const u1 = Math.random();
-        const u2 = Math.random();
+        if (!this._rngState) this._rngState = 12345;
+        const u1 = this._seededRandom();
+        const u2 = this._seededRandom();
         return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
     }
 }
@@ -2855,8 +2968,8 @@ class HistoricalBorrowing {
             posteriorEstimate: {
                 mean: posteriorMean,
                 sd: Math.sqrt(posteriorVar),
-                ci95: [posteriorMean - 1.96 * Math.sqrt(posteriorVar),
-                       posteriorMean + 1.96 * Math.sqrt(posteriorVar)]
+                ci95: [posteriorMean - this._normalQuantile(0.975) * Math.sqrt(posteriorVar),
+                       posteriorMean + this._normalQuantile(0.975) * Math.sqrt(posteriorVar)]
             },
             comparison: {
                 currentOnly: { mean: y1, se: s1 / Math.sqrt(n1) },
@@ -2929,8 +3042,8 @@ class HistoricalBorrowing {
             posteriorEstimate: {
                 mean: posteriorMean,
                 sd: Math.sqrt(posteriorVar),
-                ci95: [posteriorMean - 1.96 * Math.sqrt(posteriorVar),
-                       posteriorMean + 1.96 * Math.sqrt(posteriorVar)]
+                ci95: [posteriorMean - this._normalQuantile(0.975) * Math.sqrt(posteriorVar),
+                       posteriorMean + this._normalQuantile(0.975) * Math.sqrt(posteriorVar)]
             },
             borrowingMetrics: {
                 effectiveSampleSize: 1 / posteriorVar / (1 / (currentData.sd ** 2 / currentData.n)),
@@ -2985,8 +3098,8 @@ class HistoricalBorrowing {
             posteriorEstimate: {
                 mean: posteriorMean,
                 sd: Math.sqrt(posteriorVar),
-                ci95: [posteriorMean - 1.96 * Math.sqrt(posteriorVar),
-                       posteriorMean + 1.96 * Math.sqrt(posteriorVar)]
+                ci95: [posteriorMean - this._normalQuantile(0.975) * Math.sqrt(posteriorVar),
+                       posteriorMean + this._normalQuantile(0.975) * Math.sqrt(posteriorVar)]
             },
             borrowingMetrics: {
                 effectiveBorrowing: borrowingFactor,
@@ -3004,6 +3117,32 @@ class HistoricalBorrowing {
         const t = 1 / (1 + p * x);
         const y = 1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
         return 0.5 * (1 + sign * y);
+    }
+
+    _normalQuantile(p) {
+        const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+                   1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+        const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+                   6.680131188771972e1, -1.328068155288572e1];
+        const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
+                   -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+        const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0,
+                   3.754408661907416e0];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5; r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
     }
 }
 
@@ -3280,10 +3419,11 @@ class ThresholdAnalysis {
         const invariantUpper = Infinity; // Upper bound is infinite for best
 
         // Robustness assessment
+        const zCrit = this._normalQuantile(0.975);
         const robustness = thresholds.map(t => ({
             treatment: t.treatment,
             robustnessRatio: t.threshold / ses[treatments.indexOf(t.treatment)],
-            interpretation: t.threshold / ses[treatments.indexOf(t.treatment)] > 1.96 ?
+            interpretation: t.threshold / ses[treatments.indexOf(t.treatment)] > zCrit ?
                 'Robust to sampling uncertainty' : 'Sensitive to sampling uncertainty'
         }));
 
@@ -3338,6 +3478,32 @@ class ThresholdAnalysis {
             switchPoints: thresholdWTP.filter((_, i) => i > 0).map(t => t.wtp)
         };
     }
+
+    _normalQuantile(p) {
+        const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+                   1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+        const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+                   6.680131188771972e1, -1.328068155288572e1];
+        const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
+                   -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+        const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0,
+                   3.754408661907416e0];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5; r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
+    }
 }
 
 
@@ -3384,7 +3550,7 @@ class FederatedMetaAnalysis {
             pooledEstimate: {
                 effect: mu,
                 se,
-                ci95: [mu - 1.96 * se, mu + 1.96 * se]
+                ci95: [mu - this._normalQuantile(0.975) * se, mu + this._normalQuantile(0.975) * se]
             },
             heterogeneity: {
                 tau2,
@@ -3434,7 +3600,7 @@ class FederatedMetaAnalysis {
             pooledEstimate: {
                 effect: mu,
                 se: adjustedSE,
-                ci95: [mu - 1.96 * adjustedSE, mu + 1.96 * adjustedSE]
+                ci95: [mu - this._normalQuantile(0.975) * adjustedSE, mu + this._normalQuantile(0.975) * adjustedSE]
             },
             privacyGuarantee: `(${epsilon}, 0)-differential privacy`,
             interpretation: epsilon < 1 ? 'Strong privacy protection' :
@@ -3442,9 +3608,41 @@ class FederatedMetaAnalysis {
         };
     }
 
+    _seededRandom() {
+        this._rngState = (this._rngState * 1103515245 + 12345) & 0x7fffffff;
+        return this._rngState / 0x7fffffff || 1e-10;
+    }
+
     _laplaceSample(scale) {
-        const u = Math.random() - 0.5;
+        if (!this._rngState) this._rngState = 12345;
+        const u = this._seededRandom() - 0.5;
         return -scale * Math.sign(u) * Math.log(1 - 2 * Math.abs(u));
+    }
+
+    _normalQuantile(p) {
+        const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+                   1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+        const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+                   6.680131188771972e1, -1.328068155288572e1];
+        const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
+                   -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+        const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0,
+                   3.754408661907416e0];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5; r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
     }
 }
 
@@ -3661,9 +3859,10 @@ class EditorialStandards {
         const results = [];
 
         // Generate random subsets
+        if (!this._rngState) this._rngState = 12345;
         for (let i = 0; i < nSubsets; i++) {
             // Random subset of at least 2 studies
-            const subsetSize = 2 + Math.floor(Math.random() * (k - 1));
+            const subsetSize = 2 + Math.floor(this._seededRandom() * (k - 1));
             const indices = this._randomSample(k, subsetSize);
 
             const subEffects = indices.map(j => effects[j]);
@@ -3716,7 +3915,7 @@ class EditorialStandards {
         const z = mu / se;
 
         // Rosenthal's fail-safe N
-        const zCrit = 1.96;
+        const zCrit = this._normalQuantile(0.975);
         const rosenthal = Math.max(0,
             Math.pow(effects.reduce((s, y) => s + y / Math.sqrt(variances[effects.indexOf(y)]), 0), 2) /
             (zCrit ** 2) - k
@@ -3781,7 +3980,7 @@ class EditorialStandards {
         return {
             limitEffect: limitEffect,
             se: seIntercept,
-            ci95: [limitEffect - 1.96 * seIntercept, limitEffect + 1.96 * seIntercept],
+            ci95: [limitEffect - this._normalQuantile(0.975) * seIntercept, limitEffect + this._normalQuantile(0.975) * seIntercept],
             slope: slope,
             interpretation: Math.abs(slope) > 0 ?
                 'Small-study effects detected' : 'No evidence of small-study effects',
@@ -3795,10 +3994,11 @@ class EditorialStandards {
     bootstrapCI(effects, variances, tau2, nBoot = 2000) {
         const k = effects.length;
         const bootstrapEstimates = [];
+        if (!this._rngState) this._rngState = 12345;
 
         for (let b = 0; b < nBoot; b++) {
             // Resample with replacement
-            const indices = Array(k).fill(0).map(() => Math.floor(Math.random() * k));
+            const indices = Array(k).fill(0).map(() => Math.floor(this._seededRandom() * k));
             const bootEffects = indices.map(i => effects[i]);
             const bootVars = indices.map(i => variances[i]);
 
@@ -3820,7 +4020,7 @@ class EditorialStandards {
 
         return {
             ci95_percentile: [lower, upper],
-            ci95_normal: [mean - 1.96 * sd, mean + 1.96 * sd],
+            ci95_normal: [mean - this._normalQuantile(0.975) * sd, mean + this._normalQuantile(0.975) * sd],
             bootstrapMean: mean,
             bootstrapSE: sd,
             nBootstrap: nBoot
@@ -3920,8 +4120,8 @@ class EditorialStandards {
                 intercept: 0
             },
             confidenceBands: {
-                upper: precisions.map(p => 1.96),
-                lower: precisions.map(p => -1.96)
+                upper: precisions.map(p => this._normalQuantile(0.975)),
+                lower: precisions.map(p => -this._normalQuantile(0.975))
             }
         };
     }
@@ -4098,45 +4298,173 @@ class EditorialStandards {
     }
 
     _thompsonSharp(effects, variances) {
-        // Thompson & Sharp multilevel model test
+        // Thompson & Sharp (1999) multilevel model test
+        // Regresses standardized effects on sqrt(variance) to detect small-study effects
+        const k = effects.length;
+        if (k < 3) {
+            return { test: 'Thompson-Sharp', pValue: NaN, reference: 'Thompson & Sharp (1999)' };
+        }
+        const ses = variances.map(v => Math.sqrt(v));
+        const standardized = effects.map((y, i) => y / ses[i]);
+
+        // WLS regression: z_i = beta0 + beta1 * se_i, weighted by 1/var_i
+        const weights = variances.map(v => 1 / v);
+        const sumW = weights.reduce((a, b) => a + b, 0);
+        const sumWX = ses.reduce((s, x, i) => s + weights[i] * x, 0);
+        const sumWY = standardized.reduce((s, y, i) => s + weights[i] * y, 0);
+        const sumWXY = ses.reduce((s, x, i) => s + weights[i] * x * standardized[i], 0);
+        const sumWX2 = ses.reduce((s, x, i) => s + weights[i] * x * x, 0);
+
+        const denom = sumW * sumWX2 - sumWX * sumWX;
+        const slope = (sumW * sumWXY - sumWX * sumWY) / denom;
+        const intercept = (sumWY - slope * sumWX) / sumW;
+
+        // Residual MSE and SE of slope
+        const fitted = ses.map(x => intercept + slope * x);
+        const rss = standardized.reduce((s, y, i) => s + weights[i] * (y - fitted[i]) ** 2, 0);
+        const mse = rss / (k - 2);
+        const seSlope = Math.sqrt(mse * sumW / denom);
+
+        const tStat = slope / seSlope;
+        const pValue = 2 * (1 - this._tCDF(Math.abs(tStat), k - 2));
+
         return {
             test: 'Thompson-Sharp',
-            pValue: 0.1, // Placeholder
+            slope,
+            se: seSlope,
+            t: tStat,
+            pValue,
+            significant: pValue < 0.1,
             reference: 'Thompson & Sharp (1999)'
         };
     }
 
     _macaskillTest(effects, variances) {
-        // Macaskill's pool-first approach
+        // Macaskill et al (2001) pooled regression test
+        // Regresses effects on variance (pool-first approach), using inverse-variance weights
+        const k = effects.length;
+        if (k < 3) {
+            return { test: 'Macaskill', pValue: NaN, reference: 'Macaskill et al (2001)' };
+        }
+        const weights = variances.map(v => 1 / v);
+        const sumW = weights.reduce((a, b) => a + b, 0);
+        const sumWX = variances.reduce((s, v, i) => s + weights[i] * v, 0);
+        const sumWY = effects.reduce((s, y, i) => s + weights[i] * y, 0);
+        const sumWXY = variances.reduce((s, v, i) => s + weights[i] * v * effects[i], 0);
+        const sumWX2 = variances.reduce((s, v, i) => s + weights[i] * v * v, 0);
+
+        const denom = sumW * sumWX2 - sumWX * sumWX;
+        const slope = (sumW * sumWXY - sumWX * sumWY) / denom;
+        const intercept = (sumWY - slope * sumWX) / sumW;
+
+        // Residual MSE and SE of slope
+        const fitted = variances.map(v => intercept + slope * v);
+        const rss = effects.reduce((s, y, i) => s + weights[i] * (y - fitted[i]) ** 2, 0);
+        const mse = rss / (k - 2);
+        const seSlope = Math.sqrt(mse * sumW / denom);
+
+        const tStat = slope / seSlope;
+        const pValue = 2 * (1 - this._tCDF(Math.abs(tStat), k - 2));
+
         return {
             test: 'Macaskill',
-            pValue: 0.1, // Placeholder
+            slope,
+            se: seSlope,
+            t: tStat,
+            pValue,
+            significant: pValue < 0.1,
             reference: 'Macaskill et al (2001)'
         };
     }
 
     _petersTest(effects, variances) {
-        // Peters' test using sample size as predictor
+        // Peters et al (2006) test using 1/n as predictor
+        // Approximates n from variance: for a log-OR, var ~ 1/a + 1/b + 1/c + 1/d ~ 4/n
+        // so n ~ 4/var. Predictor is 1/n ~ var/4.
+        const k = effects.length;
+        if (k < 3) {
+            return { test: 'Peters', pValue: NaN, reference: 'Peters et al (2006)' };
+        }
+        const invN = variances.map(v => v / 4);
+        const weights = variances.map(v => 1 / v);
+        const sumW = weights.reduce((a, b) => a + b, 0);
+        const sumWX = invN.reduce((s, x, i) => s + weights[i] * x, 0);
+        const sumWY = effects.reduce((s, y, i) => s + weights[i] * y, 0);
+        const sumWXY = invN.reduce((s, x, i) => s + weights[i] * x * effects[i], 0);
+        const sumWX2 = invN.reduce((s, x, i) => s + weights[i] * x * x, 0);
+
+        const denom = sumW * sumWX2 - sumWX * sumWX;
+        const slope = (sumW * sumWXY - sumWX * sumWY) / denom;
+        const intercept = (sumWY - slope * sumWX) / sumW;
+
+        // Residual MSE and SE of slope
+        const fitted = invN.map(x => intercept + slope * x);
+        const rss = effects.reduce((s, y, i) => s + weights[i] * (y - fitted[i]) ** 2, 0);
+        const mse = rss / (k - 2);
+        const seSlope = Math.sqrt(mse * sumW / denom);
+
+        const tStat = slope / seSlope;
+        const pValue = 2 * (1 - this._tCDF(Math.abs(tStat), k - 2));
+
         return {
             test: 'Peters',
-            pValue: 0.1, // Placeholder
+            slope,
+            se: seSlope,
+            t: tStat,
+            pValue,
+            significant: pValue < 0.1,
             reference: 'Peters et al (2006)'
         };
     }
 
     _harbordTest(effects, variances) {
-        // Harbord's score-based test
+        // Harbord et al (2006) score-based test for binary outcomes
+        // Uses standardized score (Z) and variance (V) decomposition
+        // Regresses Z/sqrt(V) on 1/sqrt(V), testing intercept = 0
+        const k = effects.length;
+        if (k < 3) {
+            return { test: 'Harbord', pValue: NaN, reference: 'Harbord et al (2006)' };
+        }
+        const ses = variances.map(v => Math.sqrt(v));
+        const sqrtV = ses;
+        const invSqrtV = sqrtV.map(s => 1 / s);
+        const zScores = effects.map((y, i) => y / ses[i]);
+
+        // OLS regression: z_i = alpha + beta * (1/se_i)
+        const meanX = invSqrtV.reduce((a, b) => a + b, 0) / k;
+        const meanY = zScores.reduce((a, b) => a + b, 0) / k;
+        const ssXX = invSqrtV.reduce((s, x) => s + (x - meanX) ** 2, 0);
+        const ssXY = invSqrtV.reduce((s, x, i) => s + (x - meanX) * (zScores[i] - meanY), 0);
+
+        const slope = ssXY / ssXX;
+        const intercept = meanY - slope * meanX;
+
+        // SE of intercept
+        const fitted = invSqrtV.map(x => intercept + slope * x);
+        const rss = zScores.reduce((s, z, i) => s + (z - fitted[i]) ** 2, 0);
+        const mse = rss / (k - 2);
+        const sumX2 = invSqrtV.reduce((s, x) => s + x * x, 0);
+        const seIntercept = Math.sqrt(mse * sumX2 / (k * ssXX));
+
+        const tStat = intercept / seIntercept;
+        const pValue = 2 * (1 - this._tCDF(Math.abs(tStat), k - 2));
+
         return {
             test: 'Harbord',
-            pValue: 0.1, // Placeholder
+            intercept,
+            se: seIntercept,
+            t: tStat,
+            pValue,
+            significant: pValue < 0.1,
             reference: 'Harbord et al (2006)'
         };
     }
 
     _randomSample(n, k) {
+        if (!this._rngState) this._rngState = 12345;
         const indices = Array(n).fill(0).map((_, i) => i);
         for (let i = n - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
+            const j = Math.floor(this._seededRandom() * (i + 1));
             [indices[i], indices[j]] = [indices[j], indices[i]];
         }
         return indices.slice(0, k);
@@ -4203,8 +4531,8 @@ class EditorialStandards {
     }
 
     _tQuantile(p, df) {
-        // Newton-Raphson for t quantile
-        let t = 1.96;
+        // Newton-Raphson for t quantile — use normal quantile as initial guess
+        let t = this._normalQuantile(p);
         for (let i = 0; i < 20; i++) {
             const cdf = this._tCDF(t, df);
             const pdf = Math.exp(-0.5 * (df + 1) * Math.log(1 + t * t / df)) /
@@ -4327,6 +4655,11 @@ class EditorialStandards {
 
     _beta(a, b) {
         return Math.exp(this._gammaLn(a) + this._gammaLn(b) - this._gammaLn(a + b));
+    }
+
+    _seededRandom() {
+        this._rngState = (this._rngState * 1103515245 + 12345) & 0x7fffffff;
+        return this._rngState / 0x7fffffff || 1e-10;
     }
 }
 
@@ -4552,7 +4885,7 @@ class PopulationAdjustment {
         return {
             estimate: diff,
             se: se,
-            ci95: [diff - 1.96 * se, diff + 1.96 * se],
+            ci95: [diff - this._normalQuantile(0.975) * se, diff + this._normalQuantile(0.975) * se],
             pValue: 2 * (1 - this._normalCDF(Math.abs(diff / se)))
         };
     }
@@ -4710,6 +5043,32 @@ class PopulationAdjustment {
 
     _multiplyMatrixVector(matrix, vector) {
         return matrix.map(row => row.reduce((sum, val, i) => sum + val * vector[i], 0));
+    }
+
+    _normalQuantile(p) {
+        const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+                   1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+        const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+                   6.680131188771972e1, -1.328068155288572e1];
+        const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
+                   -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+        const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0,
+                   3.754408661907416e0];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5; r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
     }
 }
 
@@ -4943,9 +5302,10 @@ class CureFractionModels {
 
     _cureFractionCI(cureProb, n) {
         const se = Math.sqrt(cureProb * (1 - cureProb) / n);
+        const zCrit = this._normalQuantile(0.975);
         return [
-            Math.max(0, cureProb - 1.96 * se),
-            Math.min(1, cureProb + 1.96 * se)
+            Math.max(0, cureProb - zCrit * se),
+            Math.min(1, cureProb + zCrit * se)
         ];
     }
 
@@ -4994,6 +5354,32 @@ class CureFractionModels {
             parameters: { scale: 1 },
             baselineF: (t) => 1 - Math.exp(-t)
         };
+    }
+
+    _normalQuantile(p) {
+        const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+                   1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+        const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+                   6.680131188771972e1, -1.328068155288572e1];
+        const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
+                   -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+        const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0,
+                   3.754408661907416e0];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5; r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
     }
 }
 
@@ -5435,7 +5821,7 @@ class StructuralUncertainty {
     }
 
     _bicWeights(models) {
-        const bics = models.map(m => m.bic || 0);
+        const bics = models.map(m => m.bic ?? 0);
         const minBIC = Math.min(...bics);
         const deltaBIC = bics.map(b => b - minBIC);
         const rawWeights = deltaBIC.map(d => Math.exp(-0.5 * d));
@@ -5444,7 +5830,7 @@ class StructuralUncertainty {
     }
 
     _aicWeights(models) {
-        const aics = models.map(m => m.aic || 0);
+        const aics = models.map(m => m.aic ?? 0);
         const minAIC = Math.min(...aics);
         const deltaAIC = aics.map(a => a - minAIC);
         const rawWeights = deltaAIC.map(d => Math.exp(-0.5 * d));
@@ -6594,17 +6980,18 @@ class RelativeEffectivenessAssessment {
     _analyzeDirectEvidence(directComparisons) {
         const results = [];
 
+        const zCrit = this._normalQuantile(0.975);
         directComparisons.forEach(comparison => {
             const effect = comparison.effect;
-            const se = comparison.se || (comparison.ciHigh - comparison.ciLow) / 3.92;
+            const se = comparison.se || (comparison.ciHigh - comparison.ciLow) / (2 * zCrit);
 
             results.push({
                 intervention: comparison.intervention,
                 comparator: comparison.comparator,
                 effect,
                 se,
-                ciLow: effect - 1.96 * se,
-                ciHigh: effect + 1.96 * se,
+                ciLow: effect - zCrit * se,
+                ciHigh: effect + zCrit * se,
                 pValue: this._calculatePValue(effect, se),
                 studyCount: comparison.studies?.length || 1,
                 totalN: comparison.totalN,
@@ -6620,14 +7007,15 @@ class RelativeEffectivenessAssessment {
 
         if (evidence.nmaNetwork) {
             // NMA-based indirect comparisons
+            const zCritIC = this._normalQuantile(0.975);
             evidence.nmaNetwork.indirectComparisons?.forEach(ic => {
                 results.push({
                     intervention: ic.treatment1,
                     comparator: ic.treatment2,
                     effect: ic.effect,
                     se: ic.se,
-                    ciLow: ic.effect - 1.96 * ic.se,
-                    ciHigh: ic.effect + 1.96 * ic.se,
+                    ciLow: ic.effect - zCritIC * ic.se,
+                    ciHigh: ic.effect + zCritIC * ic.se,
                     pValue: this._calculatePValue(ic.effect, ic.se),
                     method: 'NMA',
                     consistencyCheck: ic.consistencyPValue
@@ -6790,6 +7178,32 @@ class RelativeEffectivenessAssessment {
         const category = assessments.find(a => a.benefitLevel === bestLevel);
 
         return category?.benefitCategory || 'Unable to determine';
+    }
+
+    _normalQuantile(p) {
+        const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+                   1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+        const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+                   6.680131188771972e1, -1.328068155288572e1];
+        const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
+                   -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+        const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0,
+                   3.754408661907416e0];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5; r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
     }
 }
 
@@ -7316,10 +7730,16 @@ class ManagedEntryAgreements {
         };
     }
 
+    _seededRandom() {
+        this._rngState = (this._rngState * 1103515245 + 12345) & 0x7fffffff;
+        return this._rngState / 0x7fffffff || 1e-10;
+    }
+
     _simulateOutcome(expected, variability) {
-        // Normal distribution simulation
-        const u1 = Math.random();
-        const u2 = Math.random();
+        // Normal distribution simulation (seeded PRNG)
+        if (!this._rngState) this._rngState = 12345;
+        const u1 = this._seededRandom();
+        const u2 = this._seededRandom();
         const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
 
         return Math.max(0, Math.min(1, expected + z * variability));
@@ -7572,7 +7992,7 @@ class MultiCountryHTACoordination {
     }
 
     _getReimbursementStatus(therapeuticArea, country) {
-        return Math.random() > 0.3 ? 'Reimbursed' : 'Not reimbursed';
+        return Math.random() > 0.3 ? 'Reimbursed' : 'Not reimbursed'; // STUB: placeholder
     }
 
     _getGuidelines(therapeuticArea, country) {
@@ -15987,7 +16407,7 @@ class SDG3Alignment {
     }
 
     _projectTrajectory(target, data, targetYear) {
-        return Math.random() > 0.5 ? 'on-track' : 'off-track';
+        return Math.random() > 0.5 ? 'on-track' : 'off-track'; // STUB: placeholder
     }
 
     _assessAccelerationNeeded(target, data) {
@@ -16275,7 +16695,8 @@ class PrecisionMedicineHTA {
         const effect = treated.reduce((s, d) => s + d[outcomeVar], 0) / treated.length -
                        control.reduce((s, d) => s + d[outcomeVar], 0) / control.length;
         const se = 0.1; // Simplified
-        return { estimate: effect, se, ci95: [effect - 1.96 * se, effect + 1.96 * se] };
+        const zCrit = this._normalQuantile(0.975);
+        return { estimate: effect, se, ci95: [effect - zCrit * se, effect + zCrit * se] };
     }
 
     _testInteraction(data, biomarkerVar, treatmentVar, outcomeVar) {
@@ -16318,7 +16739,7 @@ class PrecisionMedicineHTA {
         const treatCost = options.treatmentCost * (options.treatPositiveOnly ? options.prevalence : 1);
         return {
             costs: cost + treatCost + 5000,
-            qalys: 10 + Math.random() * 2,
+            qalys: 10 + Math.random() * 2, // STUB: placeholder
             nmb: 50000
         };
     }
@@ -16373,6 +16794,32 @@ class PrecisionMedicineHTA {
 
     _generateGenomicRecommendations(utility, value) {
         return ['Panel testing cost-effective', 'WGS for refractory cases'];
+    }
+
+    _normalQuantile(p) {
+        const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+                   1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+        const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+                   6.680131188771972e1, -1.328068155288572e1];
+        const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
+                   -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+        const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0,
+                   3.754408661907416e0];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5; r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
     }
 }
 
@@ -16429,7 +16876,7 @@ class CausalInferenceMethods {
             ate: {
                 estimate: ate,
                 se: se,
-                ci95: [ate - 1.96 * se, ate + 1.96 * se],
+                ci95: [ate - this._normalQuantile(0.975) * se, ate + this._normalQuantile(0.975) * se],
                 pValue: 2 * (1 - this._normalCDF(Math.abs(ate / se)))
             },
             models: {
@@ -16483,7 +16930,7 @@ class CausalInferenceMethods {
             ate: {
                 estimate: ate,
                 se: se,
-                ci95: [ate - 1.96 * se, ate + 1.96 * se]
+                ci95: [ate - this._normalQuantile(0.975) * se, ate + this._normalQuantile(0.975) * se]
             },
             doublyRobust: true,
             efficiency: 'semiparametric-efficient'
@@ -16542,8 +16989,8 @@ class CausalInferenceMethods {
                 simple: did,
                 regression: regression.coefficient,
                 se: regression.se,
-                ci95: [regression.coefficient - 1.96 * regression.se,
-                       regression.coefficient + 1.96 * regression.se]
+                ci95: [regression.coefficient - this._normalQuantile(0.975) * regression.se,
+                       regression.coefficient + this._normalQuantile(0.975) * regression.se]
             },
             parallelTrends: parallelTrends,
             eventStudy: eventStudyResults,
@@ -16601,7 +17048,7 @@ class CausalInferenceMethods {
             effect: {
                 estimate: effect.estimate,
                 se: effect.se,
-                ci95: [effect.estimate - 1.96 * effect.se, effect.estimate + 1.96 * effect.se]
+                ci95: [effect.estimate - this._normalQuantile(0.975) * effect.se, effect.estimate + this._normalQuantile(0.975) * effect.se]
             },
             bandwidth: {
                 optimal: optimalBandwidth,
@@ -16744,7 +17191,7 @@ class CausalInferenceMethods {
     _fitPropensityScore(data, treatmentVar, covariates, superLearner) {
         return {
             performance: { auc: 0.75 },
-            predict: (d) => 0.3 + Math.random() * 0.4
+            predict: (d) => 0.3 + Math.random() * 0.4 // STUB: placeholder
         };
     }
 
@@ -16765,7 +17212,7 @@ class CausalInferenceMethods {
     }
 
     _computeInfluenceCurve(data, Q_star, g, ate) {
-        return data.map(() => Math.random() * 0.1 - 0.05);
+        return data.map(() => Math.random() * 0.1 - 0.05); // STUB: placeholder
     }
 
     _normalCDF(x) {
@@ -16857,7 +17304,7 @@ class CausalInferenceMethods {
     }
 
     _syntheticPlacebos(data, options, controlUnits) {
-        return controlUnits.map(u => ({ unit: u, att: Math.random() * 0.1 - 0.05 }));
+        return controlUnits.map(u => ({ unit: u, att: Math.random() * 0.1 - 0.05 })); // STUB: placeholder
     }
 
     _syntheticPValue(att, placebos) {
@@ -16884,6 +17331,32 @@ class CausalInferenceMethods {
             contrast: `${scenarios[0].intervention} vs ${scenarios[1].intervention}`,
             difference: scenarios[0].meanOutcome - scenarios[1].meanOutcome
         }];
+    }
+
+    _normalQuantile(p) {
+        const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+                   1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+        const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+                   6.680131188771972e1, -1.328068155288572e1];
+        const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
+                   -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+        const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0,
+                   3.754408661907416e0];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5; r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
     }
 }
 
@@ -17104,10 +17577,10 @@ class PreferenceElicitation {
     }
 
     // Helper methods
-    _fitConditionalLogit(data, attributes) {
+    _fitConditionalLogit(data, attributes) { // STUB: placeholder
         const n = attributes.length;
         return {
-            coefficients: attributes.reduce((c, a) => ({ ...c, [a]: Math.random() * 2 - 1 }), {}),
+            coefficients: attributes.reduce((c, a) => ({ ...c, [a]: Math.random() * 2 - 1 }), {}), // STUB: placeholder
             se: attributes.reduce((c, a) => ({ ...c, [a]: 0.1 }), {}),
             logLik: -500,
             aic: 1020,
@@ -17131,7 +17604,7 @@ class PreferenceElicitation {
             classes: Array.from({ length: nClasses }, (_, i) => ({
                 classId: i + 1,
                 probability: 1 / nClasses,
-                coefficients: attributes.reduce((c, a) => ({ ...c, [a]: Math.random() * 2 - 1 }), {})
+                coefficients: attributes.reduce((c, a) => ({ ...c, [a]: Math.random() * 2 - 1 }), {}) // STUB: placeholder
             }))
         };
     }
@@ -17160,11 +17633,11 @@ class PreferenceElicitation {
     }
 
     _analyzeCase1BWS(data, items, method) {
-        return { raw: items.reduce((r, i) => ({ ...r, [i]: Math.random() }), {}), individual: [] };
+        return { raw: items.reduce((r, i) => ({ ...r, [i]: Math.random() }), {}), individual: [] }; // STUB: placeholder
     }
 
     _analyzeCase2BWS(data, attributes, method) {
-        return { raw: attributes.reduce((r, a) => ({ ...r, [a]: Math.random() }), {}), individual: [] };
+        return { raw: attributes.reduce((r, a) => ({ ...r, [a]: Math.random() }), {}), individual: [] }; // STUB: placeholder
     }
 
     _analyzeCase3BWS(data, attributes, method) {
@@ -17323,7 +17796,7 @@ class AdvancedSurvivalMethods {
             difference: {
                 estimate: rmstDiff,
                 se: seDiff,
-                ci95: [rmstDiff - 1.96 * seDiff, rmstDiff + 1.96 * seDiff],
+                ci95: [rmstDiff - this._normalQuantile(0.975) * seDiff, rmstDiff + this._normalQuantile(0.975) * seDiff],
                 pValue: 2 * (1 - this._normalCDF(Math.abs(rmstDiff / seDiff)))
             },
             ratio: {
@@ -17640,7 +18113,7 @@ class AdvancedSurvivalMethods {
     }
 
     _calculateELOS(probs, states) {
-        return states.reduce((e, s) => ({ ...e, [s]: 2 + Math.random() * 3 }), {});
+        return states.reduce((e, s) => ({ ...e, [s]: 2 + Math.random() * 3 }), {}); // STUB: placeholder
     }
 
     _calculateTransitionProbabilities(intensities, tmat, options) {
@@ -17661,7 +18134,7 @@ class AdvancedSurvivalMethods {
 
     _fitCoxModel(data, timeVar, eventVar, covariates) {
         return {
-            coefficients: covariates.reduce((c, v) => ({ ...c, [v]: Math.random() * 0.5 }), {}),
+            coefficients: covariates.reduce((c, v) => ({ ...c, [v]: Math.random() * 0.5 }), {}), // STUB: placeholder
             ci: covariates.reduce((c, v) => ({ ...c, [v]: [0.8, 1.2] }), {})
         };
     }
@@ -17671,7 +18144,7 @@ class AdvancedSurvivalMethods {
     }
 
     _calculatePseudoObservations(data, t, outcome, timeVar, eventVar) {
-        return data.map(d => ({ ...d, pseudo: Math.random() }));
+        return data.map(d => ({ ...d, pseudo: Math.random() })); // STUB: placeholder
     }
 
     _fitGEEModel(pseudoObs, covariates, link) {
@@ -17680,6 +18153,32 @@ class AdvancedSurvivalMethods {
 
     _calculateMarginalEffects(model, covariates) {
         return covariates.reduce((m, v) => ({ ...m, [v]: 0.05 }), {});
+    }
+
+    _normalQuantile(p) {
+        const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+                   1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+        const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+                   6.680131188771972e1, -1.328068155288572e1];
+        const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
+                   -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+        const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0,
+                   3.754408661907416e0];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5; r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
     }
 }
 
@@ -17937,11 +18436,11 @@ class BayesianDecisionAnalysis {
     }
 
     _calculateEVPI(results, wtp) {
-        return 5000 + Math.random() * 10000;
+        return 5000 + Math.random() * 10000; // STUB: placeholder
     }
 
     _calculateValueOfStratification(subgroupEVPI, results) {
-        return 2000 + Math.random() * 5000;
+        return 2000 + Math.random() * 5000; // STUB: placeholder
     }
 
     _determineOptimalStrategy(subgroupEVPI, value) {
@@ -17974,7 +18473,7 @@ class BayesianDecisionAnalysis {
     }
 
     _calculateNPV(results, wtp) {
-        return 100000 + Math.random() * 200000;
+        return 100000 + Math.random() * 200000; // STUB: placeholder
     }
 
     _blackScholesOption(S, K, T, r, sigma, type) {
@@ -18026,7 +18525,7 @@ class BayesianDecisionAnalysis {
     }
 
     _evaluateDesign(design, prior, objectives, criteria, options) {
-        return Math.random() * 100000;
+        return Math.random() * 100000; // STUB: placeholder
     }
 
     _assessPriorSensitivity(design, prior, options) {
@@ -18297,11 +18796,11 @@ class MachineLearningHTA {
     }
 
     _predictCATE(forest, d, covariates) {
-        return { estimate: 0.1 + Math.random() * 0.2, variance: 0.01 };
+        return { estimate: 0.1 + Math.random() * 0.2, variance: 0.01 }; // STUB: placeholder
     }
 
     _calculateVariableImportance(forest, covariates) {
-        return covariates.reduce((imp, v) => ({ ...imp, [v]: Math.random() }), {});
+        return covariates.reduce((imp, v) => ({ ...imp, [v]: Math.random() }), {}); // STUB: placeholder
     }
 
     _identifySubgroups(data, cate, covariates) {
@@ -18312,7 +18811,7 @@ class MachineLearningHTA {
     }
 
     _bestLinearProjection(cate, data, covariates) {
-        return covariates.reduce((blp, v) => ({ ...blp, [v]: { coef: Math.random() * 0.1, se: 0.02 }}), {});
+        return covariates.reduce((blp, v) => ({ ...blp, [v]: { coef: Math.random() * 0.1, se: 0.02 }}), {}); // STUB: placeholder
     }
 
     _calibrationTest(cate, data, treatment, outcome) {
@@ -18320,17 +18819,17 @@ class MachineLearningHTA {
     }
 
     _crossValidatedPredictions(data, outcome, covariates, learner, folds) {
-        return data.map(() => Math.random());
+        return data.map(() => Math.random()); // STUB: placeholder
     }
 
     _findOptimalWeights(predictions, outcomes, metalearner) {
         const n = predictions.length;
         const uniform = 1 / n;
-        return predictions.map(() => uniform + (Math.random() - 0.5) * 0.2);
+        return predictions.map(() => uniform + (Math.random() - 0.5) * 0.2); // STUB: placeholder
     }
 
     _fitLearner(data, outcome, covariates, learner) {
-        return { predict: (d) => Math.random() };
+        return { predict: (d) => Math.random() }; // STUB: placeholder
     }
 
     _calculateCVRisk(predictions, outcomes) {
@@ -18353,15 +18852,15 @@ class MachineLearningHTA {
     }
 
     _predictRiskScore(trained, d, covariates) {
-        return Math.random();
+        return Math.random(); // STUB: placeholder
     }
 
     _calculateConcordance(scores, data, timeVar, eventVar) {
-        return 0.72 + Math.random() * 0.1;
+        return 0.72 + Math.random() * 0.1; // STUB: placeholder
     }
 
     _calculateSHAPValues(model, data, covariates) {
-        return data.map(() => covariates.reduce((s, c) => ({ ...s, [c]: Math.random() - 0.5 }), {}));
+        return data.map(() => covariates.reduce((s, c) => ({ ...s, [c]: Math.random() - 0.5 }), {})); // STUB: placeholder
     }
 
     _aggregateSHAP(shap) {
@@ -18377,19 +18876,19 @@ class MachineLearningHTA {
     }
 
     _tLearner(data, treatment, outcome, covariates, learner) {
-        return { cate: data.map(() => Math.random() * 0.3) };
+        return { cate: data.map(() => Math.random() * 0.3) }; // STUB: placeholder
     }
 
     _sLearner(data, treatment, outcome, covariates, learner) {
-        return { cate: data.map(() => Math.random() * 0.3) };
+        return { cate: data.map(() => Math.random() * 0.3) }; // STUB: placeholder
     }
 
     _xLearner(data, treatment, outcome, covariates, learner) {
-        return { cate: data.map(() => Math.random() * 0.3) };
+        return { cate: data.map(() => Math.random() * 0.3) }; // STUB: placeholder
     }
 
     _rLearner(data, treatment, outcome, covariates, learner) {
-        return { cate: data.map(() => Math.random() * 0.3) };
+        return { cate: data.map(() => Math.random() * 0.3) }; // STUB: placeholder
     }
 
     _compareMetaLearners(results, data, treatment, outcome) {
@@ -18397,11 +18896,11 @@ class MachineLearningHTA {
     }
 
     _fitQFunction(data, states, action, reward, futureQ, discount, algorithm) {
-        return { predict: (s, a) => Math.random() };
+        return { predict: (s, a) => Math.random() }; // STUB: placeholder
     }
 
     _deriveOptimalPolicy(qFunction, stateVars) {
-        return { recommend: (state) => Math.random() > 0.5 ? 1 : 0 };
+        return { recommend: (state) => Math.random() > 0.5 ? 1 : 0 }; // STUB: placeholder
     }
 
     _evaluateRegime(data, policies, stateVars, discount) {
@@ -18649,7 +19148,81 @@ class AdvancedNMAMethods {
     }
 
     _testProportionalOdds(fit, data) {
-        return { holds: true, pValue: 0.15 };
+        // Brant-type score test for the proportional odds assumption
+        // Compares category-specific log-ORs: under PO, all should be equal
+        // Uses chi-squared test on the heterogeneity of category-specific estimates
+        const coefficients = fit.coefficients || {};
+        const catKeys = Object.keys(coefficients);
+        const numCats = catKeys.length;
+
+        if (numCats < 2) {
+            // Need at least 2 category-specific estimates to test PO
+            // With 0-1 categories, PO is trivially satisfied
+            return { holds: true, pValue: 1.0 };
+        }
+
+        // Extract category-specific log-ORs and SEs
+        const estimates = catKeys.map(c => {
+            const coeff = coefficients[c];
+            if (coeff && typeof coeff.or === 'number' && coeff.ci95) {
+                const logOR = Math.log(coeff.or);
+                const logCI = coeff.ci95.map(x => Math.log(Math.max(x, 1e-10)));
+                const se = (logCI[1] - logCI[0]) / (2 * 1.96);
+                return { logOR, se: Math.max(se, 1e-10) };
+            }
+            return null;
+        }).filter(e => e !== null);
+
+        if (estimates.length < 2) {
+            return { holds: true, pValue: 1.0 };
+        }
+
+        // Inverse-variance weighted pooled estimate
+        const weights = estimates.map(e => 1 / (e.se * e.se));
+        const sumW = weights.reduce((a, b) => a + b, 0);
+        const pooled = estimates.reduce((s, e, i) => s + weights[i] * e.logOR, 0) / sumW;
+
+        // Chi-squared test for heterogeneity across categories (Brant test statistic)
+        const chiSq = estimates.reduce((s, e, i) => s + weights[i] * (e.logOR - pooled) ** 2, 0);
+        const df = estimates.length - 1;
+
+        // Chi-squared p-value via regularized lower incomplete gamma
+        const pValue = 1 - this._chiSquareCDF(chiSq, df);
+        const holds = pValue >= 0.05;
+
+        return { holds, chiSquared: chiSq, df, pValue };
+    }
+
+    _chiSquareCDF(x, df) {
+        return this._gammaCDF(x / 2, df / 2);
+    }
+
+    _gammaCDF(x, a) {
+        if (x <= 0) return 0;
+        return this._lowerGamma(a, x) / this._gamma(a);
+    }
+
+    _lowerGamma(a, x) {
+        let sum = 0, term = 1 / a;
+        for (let n = 0; n < 100; n++) {
+            sum += term;
+            term *= x / (a + n + 1);
+            if (Math.abs(term) < 1e-10) break;
+        }
+        return Math.pow(x, a) * Math.exp(-x) * sum;
+    }
+
+    _gamma(z) {
+        const g = 7;
+        const c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+            771.32342877765313, -176.61502916214059, 12.507343278686905,
+            -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+        if (z < 0.5) return Math.PI / (Math.sin(Math.PI * z) * this._gamma(1 - z));
+        z -= 1;
+        let x = c[0];
+        for (let i = 1; i < g + 2; i++) x += c[i] / (z + i);
+        const t = z + g + 0.5;
+        return Math.sqrt(2 * Math.PI) * Math.pow(t, z + 0.5) * Math.exp(-t) * x;
     }
 
     _fitTimeVaryingNMA(data, treatment, study, time, outcome, timePoints, model) {
@@ -18985,7 +19558,8 @@ class MissingDataMethods {
         const U = analyses.reduce((s, a) => s + a.se * a.se, 0) / analyses.length;
         const B = analyses.reduce((s, a) => s + Math.pow(a.estimate - Q, 2), 0) / (analyses.length - 1);
         const T = U + (1 + 1 / analyses.length) * B;
-        return { estimate: Q, se: Math.sqrt(T), ci95: [Q - 1.96 * Math.sqrt(T), Q + 1.96 * Math.sqrt(T)] };
+        const zCrit = this._normalQuantile(0.975);
+        return { estimate: Q, se: Math.sqrt(T), ci95: [Q - zCrit * Math.sqrt(T), Q + zCrit * Math.sqrt(T)] };
     }
 
     _calculateFMI(analyses, pooled) {
@@ -19084,6 +19658,32 @@ class MissingDataMethods {
     _assessRobustness(results) {
         const estimates = results.map(r => r.estimate);
         return { min: Math.min(...estimates), max: Math.max(...estimates), robust: true };
+    }
+
+    _normalQuantile(p) {
+        const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
+                   1.383577518672690e2, -3.066479806614716e1, 2.506628277459239e0];
+        const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
+                   6.680131188771972e1, -1.328068155288572e1];
+        const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
+                   -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0];
+        const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0,
+                   3.754408661907416e0];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5; r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
     }
 }
 
@@ -19283,11 +19883,11 @@ class DynamicTreatmentRegimes {
     }
 
     _calculateSMARTWeights(data, regimes) {
-        return data.map(() => 1 + Math.random() * 3);
+        return data.map(() => 1 + Math.random() * 3); // STUB: placeholder
     }
 
     _compareEmbeddedRegimes(data, regimes, weights, outcome) {
-        return regimes.map(r => ({ regime: r.id, mean: 5 + Math.random() * 2, se: 0.3 }));
+        return regimes.map(r => ({ regime: r.id, mean: 5 + Math.random() * 2, se: 0.3 })); // STUB: placeholder
     }
 
     _estimateOptimalRegime(data, tailoring, outcome) {
@@ -19327,7 +19927,7 @@ class DynamicTreatmentRegimes {
     }
 
     _calculateIPWeights(data, model, stabilized) {
-        return data.map(() => 1 + Math.random() * 2);
+        return data.map(() => 1 + Math.random() * 2); // STUB: placeholder
     }
 
     _truncateWeights(weights, truncation) {
@@ -19371,7 +19971,7 @@ class DynamicTreatmentRegimes {
     }
 
     _solveWeightedSVM(data, kernel) {
-        return { predict: (d) => Math.random() > 0.5 ? 1 : 0 };
+        return { predict: (d) => Math.random() > 0.5 ? 1 : 0 }; // STUB: placeholder
     }
 
     _evaluateRule(data, rule, outcome) {
@@ -19582,13 +20182,13 @@ class GeneralizabilityTransportability {
     }
 
     _calculateIPSW(trial, target, covariates) {
-        return trial.map(() => 1 + Math.random());
+        return trial.map(() => 1 + Math.random()); // STUB: placeholder
     }
 
     _weightedEstimate(data, weights, treatment, outcome) {
         const treated = data.filter(d => d[treatment] === 1);
         const control = data.filter(d => d[treatment] === 0);
-        const effect = 0.15 + Math.random() * 0.1;
+        const effect = 0.15 + Math.random() * 0.1; // STUB: placeholder
         return { estimate: effect, se: 0.05, ci95: [effect - 0.1, effect + 0.1] };
     }
 
@@ -19616,11 +20216,11 @@ class GeneralizabilityTransportability {
     }
 
     _identifyEffectModifiers(data, treatment, outcome, candidates) {
-        return candidates.filter(() => Math.random() > 0.5);
+        return candidates.filter(() => Math.random() > 0.5); // STUB: placeholder
     }
 
     _calculateTransportWeights(source, target, modifiers, method) {
-        return source.map(() => 1 + Math.random());
+        return source.map(() => 1 + Math.random()); // STUB: placeholder
     }
 
     _transportedEstimate(source, weights, treatment, outcome) {
@@ -19952,24 +20552,24 @@ class AdvancedUncertaintyQuantification {
     }
 
     _gpSensitivity(emulator, inputs) {
-        return inputs.reduce((s, v) => ({ ...s, [v]: Math.random() }), {});
+        return inputs.reduce((s, v) => ({ ...s, [v]: Math.random() }), {}); // STUB: placeholder
     }
 
     _saltelliSampling(ranges, n) {
         return Array(n * (2 * Object.keys(ranges).length + 2)).fill(null).map(() =>
             Object.entries(ranges).reduce((s, [k, r]) => ({
                 ...s,
-                [k]: r.min + Math.random() * (r.max - r.min)
+                [k]: r.min + Math.random() * (r.max - r.min) // STUB: placeholder
             }), {})
         );
     }
 
     _calculateFirstOrderSobol(param, samples, outputs, params, method) {
-        return 0.1 + Math.random() * 0.3;
+        return 0.1 + Math.random() * 0.3; // STUB: placeholder
     }
 
     _calculateTotalOrderSobol(param, samples, outputs, params, method) {
-        return 0.15 + Math.random() * 0.35;
+        return 0.15 + Math.random() * 0.35; // STUB: placeholder
     }
 
     _bootstrapSobolCI(param, samples, outputs, params, order, n) {
@@ -20002,7 +20602,7 @@ class AdvancedUncertaintyQuantification {
     }
 
     _quadraturePCE(model, distributions, basis, order) {
-        return Array(Math.pow(order + 1, Object.keys(distributions).length)).fill(0).map(() => Math.random() * 0.1);
+        return Array(Math.pow(order + 1, Object.keys(distributions).length)).fill(0).map(() => Math.random() * 0.1); // STUB: placeholder
     }
 
     _regressionPCE(model, distributions, basis, order) {
@@ -20014,11 +20614,11 @@ class AdvancedUncertaintyQuantification {
     }
 
     _sobolFromPCE(coefficients, basis, params) {
-        return params.reduce((s, p) => ({ ...s, [p]: Math.random() * 0.3 }), {});
+        return params.reduce((s, p) => ({ ...s, [p]: Math.random() * 0.3 }), {}); // STUB: placeholder
     }
 
     _pceSurrogate(point, coefficients, basis) {
-        return coefficients[0] + Math.random() * 0.1;
+        return coefficients[0] + Math.random() * 0.1; // STUB: placeholder
     }
 
     _assessPCEConvergence(coefficients) {
@@ -20050,11 +20650,11 @@ class AdvancedUncertaintyQuantification {
     }
 
     _calculateRobustness(model, decision, nominal, threshold, uncertaintyModel, maxHorizon) {
-        return 0.5 + Math.random() * 0.5;
+        return 0.5 + Math.random() * 0.5; // STUB: placeholder
     }
 
     _calculateOpportuneness(model, decision, nominal, threshold, uncertaintyModel) {
-        return 0.3 + Math.random() * 0.4;
+        return 0.3 + Math.random() * 0.4; // STUB: placeholder
     }
 
     _infoGapPreference(robustness, opportuneness, options) {
@@ -20269,12 +20869,12 @@ class MediationAnalysisHTA {
     }
 
     _calculateNDE(medModel, outModel, data, options) {
-        const effect = 0.15 + Math.random() * 0.1;
+        const effect = 0.15 + Math.random() * 0.1; // STUB: placeholder
         return { estimate: effect, se: 0.04, ci95: [effect - 0.08, effect + 0.08] };
     }
 
     _calculateNIE(medModel, outModel, data, options) {
-        const effect = 0.10 + Math.random() * 0.05;
+        const effect = 0.10 + Math.random() * 0.05; // STUB: placeholder
         return { estimate: effect, se: 0.03, ci95: [effect - 0.06, effect + 0.06] };
     }
 
@@ -20300,7 +20900,7 @@ class MediationAnalysisHTA {
     }
 
     _mediatorCorrelations(data, mediators) {
-        return { matrix: mediators.map(() => mediators.map(() => Math.random())) };
+        return { matrix: mediators.map(() => mediators.map(() => Math.random())) }; // STUB: placeholder
     }
 
     _calculateInterventionalDE(data, treatment, mediator, outcome, covariates) {
@@ -20324,7 +20924,7 @@ class MediationAnalysisHTA {
     }
 
     _estimatePathCoefficients(data, paths, estimator) {
-        return paths.reduce((c, p) => ({ ...c, [`${p.from}->${p.to}`]: 0.2 + Math.random() * 0.3 }), {});
+        return paths.reduce((c, p) => ({ ...c, [`${p.from}->${p.to}`]: 0.2 + Math.random() * 0.3 }), {}); // STUB: placeholder
     }
 
     _calculatePathEffects(paths, coefficients, treatment, outcome) {

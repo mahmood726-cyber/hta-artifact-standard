@@ -56,8 +56,9 @@ class NetworkMetaAnalysis {
                 return state / 0x7fffffff;
             },
             normal: (mean = 0, sd = 1) => {
-                const u1 = this.rng?.random() || Math.random();
-                const u2 = this.rng?.random() || Math.random();
+                const seededFallback = () => { state = (state * 1103515245 + 12345) & 0x7fffffff; return state / 0x7fffffff || 1e-10; };
+                const u1 = this.rng?.random() || seededFallback();
+                const u2 = this.rng?.random() || seededFallback();
                 const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
                 return mean + sd * z;
             }
@@ -829,7 +830,7 @@ class NetworkMetaAnalysis {
     sampleGamma(shape, scale) {
         if (shape < 1) {
             // For shape < 1: Gamma(a) = Gamma(a+1) * U^(1/a)
-            const u = Math.random();
+            const u = this.rng.random();
             return this.sampleGamma(shape + 1, scale) * Math.pow(u, 1 / shape);
         }
 
@@ -844,7 +845,7 @@ class NetworkMetaAnalysis {
             } while (v <= 0);
 
             v = v * v * v;
-            const u = Math.random();
+            const u = this.rng.random();
 
             if (u < 1 - 0.0331 * x * x * x * x) {
                 return Math.max(0.001, d * v * scale);
@@ -981,8 +982,8 @@ class NetworkMetaAnalysis {
                 vsReference: this.treatments[0],
                 mean: d[j],
                 se: se,
-                ci_lower: d[j] - 1.96 * se,
-                ci_upper: d[j] + 1.96 * se,
+                ci_lower: d[j] - this.normalQuantile(0.975) * se,
+                ci_upper: d[j] + this.normalQuantile(0.975) * se,
                 z: d[j] / se,
                 pValue: 2 * (1 - this.normalCDF(Math.abs(d[j] / se)))
             });
@@ -1236,8 +1237,8 @@ class NetworkMetaAnalysis {
                         seDiff = Math.sqrt(this.results.varCov[idx][idx]);
                     } else {
                         // Bayesian or no covariance - use posterior samples or approximate
-                        const seI = (effects[this.treatments[i]].ci_upper - effects[this.treatments[i]].ci_lower) / (2 * 1.96);
-                        const seJ = (effects[this.treatments[j]].ci_upper - effects[this.treatments[j]].ci_lower) / (2 * 1.96);
+                        const seI = (effects[this.treatments[i]].ci_upper - effects[this.treatments[i]].ci_lower) / (2 * this.normalQuantile(0.975));
+                        const seJ = (effects[this.treatments[j]].ci_upper - effects[this.treatments[j]].ci_lower) / (2 * this.normalQuantile(0.975));
                         // For Bayesian, use conservative independence assumption
                         // Better: compute from posterior samples if available
                         if (this.results.samples && i !== 0 && j !== 0) {
@@ -1257,9 +1258,9 @@ class NetworkMetaAnalysis {
                         comparison: `${this.treatments[j]} vs ${this.treatments[i]}`,
                         effect: diff,
                         effectExponentiated: Math.exp(diff),  // OR or HR
-                        ci_lower: diff - 1.96 * seDiff,
-                        ci_upper: diff + 1.96 * seDiff,
-                        significant: (diff - 1.96 * seDiff > 0) || (diff + 1.96 * seDiff < 0)
+                        ci_lower: diff - this.normalQuantile(0.975) * seDiff,
+                        ci_upper: diff + this.normalQuantile(0.975) * seDiff,
+                        significant: (diff - this.normalQuantile(0.975) * seDiff > 0) || (diff + this.normalQuantile(0.975) * seDiff < 0)
                     };
                 }
             }
@@ -1306,12 +1307,12 @@ class NetworkMetaAnalysis {
 
             let nmaEffect;
             if (idx1 === 0) {
-                nmaEffect = this.results.effects.find(e => e.treatment === t2)?.mean || 0;
+                nmaEffect = this.results.effects.find(e => e.treatment === t2)?.mean ?? 0;
             } else if (idx2 === 0) {
-                nmaEffect = -(this.results.effects.find(e => e.treatment === t1)?.mean || 0);
+                nmaEffect = -(this.results.effects.find(e => e.treatment === t1)?.mean ?? 0);
             } else {
-                const d1 = this.results.effects.find(e => e.treatment === t1)?.mean || 0;
-                const d2 = this.results.effects.find(e => e.treatment === t2)?.mean || 0;
+                const d1 = this.results.effects.find(e => e.treatment === t1)?.mean ?? 0;
+                const d2 = this.results.effects.find(e => e.treatment === t2)?.mean ?? 0;
                 nmaEffect = d2 - d1;
             }
 
@@ -1355,7 +1356,7 @@ class NetworkMetaAnalysis {
                 // Edge case: NMA variance >= direct variance
                 // This means indirect evidence is weak or inconsistent
                 // Use conservative estimate: indirect variance is large
-                indirectVar = nmaVar * 2 + (this.results.tauSquared || 0);
+                indirectVar = nmaVar * 2 + (this.results.tauSquared ?? 0);
             }
 
             // Test for inconsistency: difference between direct and indirect
@@ -1485,7 +1486,7 @@ class NetworkMetaAnalysis {
         // Reference: Higgins et al. (2009), IntHout et al. (2016)
         // Should use t(k-2) distribution, not z, for proper coverage
         const avgEffect = this.results.effects.reduce((s, e) => s + e.mean, 0) / this.results.effects.length;
-        const avgSE = this.results.effects.reduce((s, e) => s + (e.se || e.sd || 0), 0) / this.results.effects.length;
+        const avgSE = this.results.effects.reduce((s, e) => s + (e.se ?? e.sd ?? 0), 0) / this.results.effects.length;
         const predictionSE = Math.sqrt(avgSE**2 + tauSq);
 
         // Number of comparisons for df
@@ -1864,12 +1865,12 @@ class NetworkMetaAnalysis {
 
             let expectedEffect;
             if (idx1 === 0) {
-                expectedEffect = this.results.effects.find(e => e.treatment === contrast.treatment2)?.mean || 0;
+                expectedEffect = this.results.effects.find(e => e.treatment === contrast.treatment2)?.mean ?? 0;
             } else if (idx2 === 0) {
-                expectedEffect = -(this.results.effects.find(e => e.treatment === contrast.treatment1)?.mean || 0);
+                expectedEffect = -(this.results.effects.find(e => e.treatment === contrast.treatment1)?.mean ?? 0);
             } else {
-                const d1 = this.results.effects.find(e => e.treatment === contrast.treatment1)?.mean || 0;
-                const d2 = this.results.effects.find(e => e.treatment === contrast.treatment2)?.mean || 0;
+                const d1 = this.results.effects.find(e => e.treatment === contrast.treatment1)?.mean ?? 0;
+                const d2 = this.results.effects.find(e => e.treatment === contrast.treatment2)?.mean ?? 0;
                 expectedEffect = d2 - d1;
             }
 
@@ -1891,8 +1892,8 @@ class NetworkMetaAnalysis {
             data,
             reference: 0,  // Centered at expected effect
             confidenceBands: [
-                { level: 0.95, z: 1.96 },
-                { level: 0.99, z: 2.576 }
+                { level: 0.95, z: this.normalQuantile(0.975) },
+                { level: 0.99, z: this.normalQuantile(0.995) }
             ]
         };
     }

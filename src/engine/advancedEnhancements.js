@@ -1573,8 +1573,8 @@ class MCMCDiagnostics {
             pValue: pValue,
             meanFirst: meanFirst,
             meanLast: meanLast,
-            converged: Math.abs(z) < 1.96,
-            interpretation: Math.abs(z) < 1.96 ?
+            converged: Math.abs(z) < this.normalQuantile(0.975),
+            interpretation: Math.abs(z) < this.normalQuantile(0.975) ?
                 'No evidence of non-stationarity' :
                 'Evidence of non-stationarity - more burn-in may be needed'
         };
@@ -1713,6 +1713,33 @@ class MCMCDiagnostics {
         const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-z * z);
         return 0.5 * (1 + sign * y);
     }
+
+    normalQuantile(p) {
+        const a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+                   1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00];
+        const b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+                   6.680131188771972e+01, -1.328068155288572e+01];
+        const c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+                   -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00];
+        const d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+                   3.754408661907416e+00];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5;
+            r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
+    }
 }
 
 // ============================================================================
@@ -1774,8 +1801,8 @@ class MultivariateMetaAnalysis {
                 outcome: outcomes[j],
                 effect: mu[j],
                 se: se,
-                ci_lower: mu[j] - 1.96 * se,
-                ci_upper: mu[j] + 1.96 * se
+                ci_lower: mu[j] - this.normalQuantile(0.975) * se,
+                ci_upper: mu[j] + this.normalQuantile(0.975) * se
             });
         }
 
@@ -1933,6 +1960,33 @@ class MultivariateMetaAnalysis {
 
         return augmented.map(row => row.slice(n));
     }
+
+    normalQuantile(p) {
+        const a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+                   1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00];
+        const b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+                   6.680131188771972e+01, -1.328068155288572e+01];
+        const c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+                   -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00];
+        const d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+                   3.754408661907416e+00];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5;
+            r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
+    }
 }
 
 // ============================================================================
@@ -1948,6 +2002,12 @@ class NetworkMetaRegression {
             nBurnin: 1000,
             ...options
         };
+        this._rngState = options.seed ?? 12345;
+    }
+
+    _seededRandom() {
+        this._rngState = (this._rngState * 1103515245 + 12345) & 0x7fffffff;
+        return this._rngState / 0x7fffffff || 1e-10;
     }
 
     /**
@@ -2117,8 +2177,8 @@ class NetworkMetaRegression {
         const self = this;
         const rng = {
             normal: (mean = 0, sd = 1) => {
-                const u1 = Math.random();
-                const u2 = Math.random();
+                const u1 = self._seededRandom();
+                const u2 = self._seededRandom();
                 const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
                 return mean + sd * z;
             },
@@ -2129,7 +2189,7 @@ class NetworkMetaRegression {
             gamma: function(shape, scale) {
                 if (shape < 1) {
                     // For shape < 1: Gamma(a) = Gamma(a+1) * U^(1/a)
-                    const u = Math.random();
+                    const u = self._seededRandom();
                     return this.gamma(shape + 1, scale) * Math.pow(u, 1 / shape);
                 }
 
@@ -2144,7 +2204,7 @@ class NetworkMetaRegression {
                     } while (v <= 0);
 
                     v = v * v * v;
-                    const u = Math.random();
+                    const u = self._seededRandom();
 
                     if (u < 1 - 0.0331 * x * x * x * x) {
                         return d * v * scale;
@@ -2461,7 +2521,7 @@ class NetworkMetaRegression {
     sampleGamma(shape, scale, rng) {
         if (shape < 1) {
             // For shape < 1, use: Gamma(a) = Gamma(a+1) * U^(1/a)
-            const u = Math.random();
+            const u = this._seededRandom();
             return this.sampleGamma(shape + 1, scale, rng) * Math.pow(u, 1 / shape);
         }
 
@@ -2476,7 +2536,7 @@ class NetworkMetaRegression {
             } while (v <= 0);
 
             v = v * v * v;
-            const u = Math.random();
+            const u = this._seededRandom();
 
             if (u < 1 - 0.0331 * x * x * x * x) {
                 return d * v * scale;
@@ -2502,6 +2562,12 @@ class MixtureCureModel {
             distribution: 'weibull',  // 'weibull', 'lognormal', 'loglogistic'
             ...options
         };
+        this._rngState = options.seed ?? 12345;
+    }
+
+    _seededRandom() {
+        this._rngState = (this._rngState * 1103515245 + 12345) & 0x7fffffff;
+        return this._rngState / 0x7fffffff || 1e-10;
     }
 
     /**
@@ -2567,8 +2633,8 @@ class MixtureCureModel {
             cureFraction: {
                 estimate: pi,
                 se: se.pi,
-                ci_lower: Math.max(0, pi - 1.96 * se.pi),
-                ci_upper: Math.min(1, pi + 1.96 * se.pi)
+                ci_lower: Math.max(0, pi - this.normalQuantile(0.975) * se.pi),
+                ci_upper: Math.min(1, pi + this.normalQuantile(0.975) * se.pi)
             },
             distribution: {
                 type: this.options.distribution,
@@ -2703,7 +2769,7 @@ class MixtureCureModel {
             // Bootstrap sample
             const indices = [];
             for (let i = 0; i < times.length; i++) {
-                indices.push(Math.floor(Math.random() * times.length));
+                indices.push(Math.floor(this._seededRandom() * times.length));
             }
             const bootTimes = indices.map(i => times[i]);
             const bootEvents = indices.map(i => events[i]);
@@ -2798,6 +2864,33 @@ class MixtureCureModel {
     normalPDF(z) {
         return Math.exp(-0.5 * z * z) / Math.sqrt(2 * Math.PI);
     }
+
+    normalQuantile(p) {
+        const a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+                   1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00];
+        const b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+                   6.680131188771972e+01, -1.328068155288572e+01];
+        const c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+                   -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00];
+        const d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+                   3.754408661907416e+00];
+        const pLow = 0.02425, pHigh = 1 - pLow;
+        let q, r;
+        if (p < pLow) {
+            q = Math.sqrt(-2 * Math.log(p));
+            return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        } else if (p <= pHigh) {
+            q = p - 0.5;
+            r = q * q;
+            return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+        } else {
+            q = Math.sqrt(-2 * Math.log(1 - p));
+            return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
+                    ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+        }
+    }
 }
 
 // ============================================================================
@@ -2884,7 +2977,7 @@ class GRADEAssessment {
     }
 
     assessInconsistency(results) {
-        const I2 = results.heterogeneity?.I2 || 0;
+        const I2 = results.heterogeneity?.I2 ?? 0;
         const pQ = results.heterogeneity?.pValueQ || 1;
 
         if (I2 > 75 || pQ < 0.01) {
@@ -2966,7 +3059,7 @@ class GRADEAssessment {
     }
 
     generateRecommendation(certainty, results) {
-        const effect = results.random?.effect || results.pooled?.effect || 0;
+        const effect = results.random?.effect ?? results.pooled?.effect ?? 0;
         const beneficial = effect > 0;
 
         if (certainty >= 3) {

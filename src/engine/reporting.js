@@ -508,7 +508,7 @@ class ReportingStandards {
         };
 
         // Heterogeneity
-        const I2 = nmaResults.heterogeneity?.I2 || 0;
+        const I2 = nmaResults.heterogeneity?.I2 ?? 0;
         domains.heterogeneity = {
             level: I2 < 25 ? 'Low concern' :
                    I2 < 75 ? 'Some concerns' : 'Major concerns',

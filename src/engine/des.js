@@ -413,7 +413,6 @@ class DiscreteEventSimulationEngine {
         // Get event definition
         const eventDef = this.model.events[event.type];
         if (!eventDef) {
-            console.warn(`Unknown event type: ${event.type}`);
             return;
         }
 
@@ -453,7 +452,6 @@ class DiscreteEventSimulationEngine {
         const toState = this.model.states[transition.to];
 
         if (!toState) {
-            console.warn(`Unknown destination state: ${transition.to}`);
             return;
         }
 
@@ -818,13 +816,14 @@ class DiscreteEventSimulationEngine {
         psaResults.summary.meanQALY.se = Math.sqrt(qalyVar / n);
 
         // 95% CI
+        const z = this.normalInverse(0.975);
         psaResults.summary.meanCost.ci = [
-            psaResults.summary.meanCost.mean - 1.96 * psaResults.summary.meanCost.se,
-            psaResults.summary.meanCost.mean + 1.96 * psaResults.summary.meanCost.se
+            psaResults.summary.meanCost.mean - z * psaResults.summary.meanCost.se,
+            psaResults.summary.meanCost.mean + z * psaResults.summary.meanCost.se
         ];
         psaResults.summary.meanQALY.ci = [
-            psaResults.summary.meanQALY.mean - 1.96 * psaResults.summary.meanQALY.se,
-            psaResults.summary.meanQALY.mean + 1.96 * psaResults.summary.meanQALY.se
+            psaResults.summary.meanQALY.mean - z * psaResults.summary.meanQALY.se,
+            psaResults.summary.meanQALY.mean + z * psaResults.summary.meanQALY.se
         ];
 
         return psaResults;

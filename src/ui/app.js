@@ -3,6 +3,10 @@
  * Reviewer Mode UI Controller
  */
 
+function escapeHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 class HTAApp {
     constructor() {
         this.project = null;
@@ -69,7 +73,13 @@ class HTAApp {
         const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('file-input');
 
+        dropZone.setAttribute('role', 'button');
+        dropZone.setAttribute('tabindex', '0');
+        dropZone.setAttribute('aria-label', 'Click or press Enter to upload a model file');
         dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+        });
 
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -1524,7 +1534,7 @@ Parameter Overrides: ${summary.parameterChanges}
         if (!logEl) return;
 
         const time = new Date().toLocaleTimeString();
-        logEl.innerHTML += `<div><span style="color: #64748b;">[${time}]</span> ${message}</div>`;
+        logEl.innerHTML += `<div><span style="color: #64748b;">[${escapeHtml(time)}]</span> ${escapeHtml(message)}</div>`;
         logEl.scrollTop = logEl.scrollHeight;
     }
 

@@ -53,7 +53,7 @@ class SurvivalAnalysisEngine {
         let lastSurv = 1.0;
         const validated = sorted.map((p, i) => {
             if (p.survival > lastSurv) {
-                console.warn(`Survival increased at time ${p.time}, capping to previous value`);
+                // Survival increased at this time point, capping to previous value
                 p.survival = lastSurv;
             }
             lastSurv = p.survival;

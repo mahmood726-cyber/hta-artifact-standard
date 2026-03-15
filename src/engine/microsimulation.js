@@ -60,6 +60,7 @@ class MicrosimulationEngine {
         };
 
         this.rng = typeof PCG32 !== 'undefined' ? new PCG32(this.options.seed) : null;
+        this._rngState = this.options.seed;
         this.progressCallback = null;
         this.auditLogger = typeof getAuditLogger !== 'undefined' ? getAuditLogger() : null;
     }
@@ -77,6 +78,14 @@ class MicrosimulationEngine {
     }
 
     /**
+     * LCG fallback PRNG (used when PCG32 is unavailable)
+     */
+    _seededRandom() {
+        this._rngState = (this._rngState * 1103515245 + 12345) & 0x7fffffff;
+        return this._rngState / 0x7fffffff || 1e-10;
+    }
+
+    /**
      * Generate random number [0, 1)
      */
     random() {
@@ -84,7 +93,7 @@ class MicrosimulationEngine {
             // PCG32 uses nextDouble() for [0, 1) with 53-bit precision
             return this.rng.nextDouble();
         }
-        return Math.random();
+        return this._seededRandom();
     }
 
     /**
@@ -693,11 +702,12 @@ class MicrosimulationEngine {
         // Confidence intervals (95%)
         const se_costs = results.summary.sd_costs / Math.sqrt(numPatients);
         const se_qalys = results.summary.sd_qalys / Math.sqrt(numPatients);
+        const z = this.normalInverseCDF(0.975);
 
-        results.summary.ci_costs_lower = results.summary.mean_costs - 1.96 * se_costs;
-        results.summary.ci_costs_upper = results.summary.mean_costs + 1.96 * se_costs;
-        results.summary.ci_qalys_lower = results.summary.mean_qalys - 1.96 * se_qalys;
-        results.summary.ci_qalys_upper = results.summary.mean_qalys + 1.96 * se_qalys;
+        results.summary.ci_costs_lower = results.summary.mean_costs - z * se_costs;
+        results.summary.ci_costs_upper = results.summary.mean_costs + z * se_costs;
+        results.summary.ci_qalys_lower = results.summary.mean_qalys - z * se_qalys;
+        results.summary.ci_qalys_upper = results.summary.mean_qalys + z * se_qalys;
 
         // Median survival (from LY distribution)
         lyValues.sort((a, b) => a - b);

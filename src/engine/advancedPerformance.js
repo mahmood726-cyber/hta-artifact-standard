@@ -67,7 +67,7 @@ class SharedMemoryManager {
      */
     createWorker(workerScript) {
         if (!this.isAvailable()) {
-            console.warn('SharedArrayBuffer not available, using message-based transfer');
+            // SharedArrayBuffer not available, using message-based transfer
         }
 
         const worker = new Worker(workerScript);
@@ -513,7 +513,6 @@ class ServiceWorkerManager {
      */
     async register() {
         if (!('serviceWorker' in navigator)) {
-            console.warn('Service Workers not supported');
             return null;
         }
 
@@ -622,7 +621,7 @@ async function syncModels() {
      * Update available callback (override in subclass)
      */
     onUpdateAvailable() {
-        console.log('New version available');
+        // Override in subclass to handle update notification
     }
 
     /**
