@@ -539,7 +539,7 @@ class ReportingStandards {
             'Major concerns': 2
         };
 
-        const domainScores = Object.values(domains).map(d => levels[d.level] || 1);
+        const domainScores = Object.values(domains).map(d => levels[d.level] ?? 1);
         const maxScore = Math.max(...domainScores);
         const avgScore = domainScores.reduce((a, b) => a + b, 0) / domainScores.length;
 
