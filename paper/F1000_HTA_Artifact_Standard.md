@@ -13,7 +13,7 @@ Mahmood Ahmad ^1,2^, Niraj Kumar ^1^, Bilaal Dar ^3^, Laiba Khan ^1^, Andrew Woo
 
 ## Abstract
 
-Health technology assessment (HTA) requires the integration of economic modelling, evidence synthesis, and uncertainty analysis, yet these tasks are commonly fragmented across proprietary desktop software, statistical programming environments, and spreadsheet-based models. We present HTA Artifact Standard v0.6, an open-source, browser-based platform that unifies Markov cohort modelling, pairwise and network meta-analysis, probabilistic sensitivity analysis, and value-of-information computation within a single client-side application. The platform comprises 6,620 lines of HTML and 69,605 lines of JavaScript across 45 modules, requires no server-side computation, and operates offline after initial load via a Service Worker. Deterministic reproducibility is enforced through a PCG32 seeded pseudo-random number generator, Kahan summation for numerical stability, and IEEE 754 double-precision compliance. Validation against R reference packages (metafor, meta) yields 8/8 benchmark tests passed, and three independent Markov reference fixtures agree with R comparator outputs to within a maximum absolute error of 4.72 x 10^-5^. The software is freely available under the MIT licence.
+Health technology assessment (HTA) requires the integration of economic modelling, evidence synthesis, and uncertainty analysis, yet these tasks are commonly fragmented across proprietary desktop software, statistical programming environments, and spreadsheet-based models. We present HTA Artifact Standard v0.6, an open-source, browser-based platform that unifies Markov cohort modelling, microsimulation, pairwise and network meta-analysis, probabilistic sensitivity analysis, and value-of-information computation within a single client-side application. The platform comprises 6,620 lines of HTML and 69,605 lines of JavaScript across 45 modules, requires no server-side computation, and operates offline after initial load via a Service Worker. Deterministic reproducibility is enforced through a PCG32 seeded pseudo-random number generator, Kahan summation for numerical stability, and IEEE 754 double-precision compliance. Validation against R reference packages (metafor v4.8-0, meta) yields 8 pairwise meta-analysis benchmark tests passed, and three independent Markov reference fixtures agree with R comparator outputs to within a maximum absolute error of 4.72 x 10^-5^. Bayesian NMA includes Gelman-Rubin R-hat convergence diagnostics. The software is freely available under the MIT licence.
 
 **Keywords:** health technology assessment, cost-effectiveness analysis, Markov model, network meta-analysis, probabilistic sensitivity analysis, value of information, evidence synthesis, open-source software
 
@@ -31,7 +31,7 @@ HTA Artifact Standard was developed to address these gaps by providing a unified
 
 HTA Artifact Standard is implemented as a client-side web application. The main entry point (`index.html`, 6,620 lines) loads 45 JavaScript modules from the `src/` directory (69,605 lines in total), organised into four subsystems:
 
-- **Engine** (`src/engine/`): Markov cohort simulation, PSA, EVPI/EVPPI computation, network meta-analysis (Bayesian MCMC and frequentist), pairwise meta-analysis, dose-response meta-analysis, three-level meta-analysis, robust variance estimation, partitioned survival analysis, decision trees, microsimulation, calibration, publication bias methods, and automated report generation.
+- **Engine** (`src/engine/`): Markov cohort simulation, microsimulation, decision trees, PSA, EVPI/EVPPI computation, network meta-analysis (Bayesian Gibbs MCMC with R-hat diagnostics and frequentist), pairwise meta-analysis (DL/REML/PM/EB with HKSJ adjustment), three-level meta-analysis, partitioned survival analysis, Mendelian randomisation, power priors for historical borrowing, publication bias methods (Egger, Begg, Copas, PET-PEESE), calibration, and automated report generation. The pairwise meta-analysis engine shares validated statistical components with related browser-based tools by the same development group, including effect size calculation, heterogeneity estimation, and confidence interval computation.
 - **Validator** (`src/validator/`): JSON Schema validation (`project.schema.json`, `results.schema.json`), semantic rule checking (probability bounds, mass conservation, circular dependency detection, reference integrity).
 - **Parser** (`src/parser/`): A safe, non-Turing-complete expression language supporting arithmetic, built-in functions (`exp`, `ln`, `sqrt`, `rate_to_prob`, `prob_to_rate`, `if`, `clamp`), and time/age-dependent parameter references.
 - **UI** (`src/ui/`): Application controller, interactive network visualisation, beginner mode, and enhanced visualisation panels.
@@ -48,19 +48,19 @@ The Markov engine supports discrete-time cohort simulation with configurable cyc
 
 ### Evidence synthesis
 
-**Pairwise meta-analysis.** The platform implements random-effects (DerSimonian-Laird [5]) and fixed-effect models. Four heterogeneity variance estimators are available: DerSimonian-Laird, restricted maximum likelihood (REML), Paule-Mandel, and empirical Bayes. The Hartung-Knapp-Sidik-Jonkman (HKSJ) adjustment [7] is provided for confidence interval construction under random effects. Heterogeneity is reported as tau-squared, I-squared with confidence intervals [6], H-squared, and prediction intervals. Sensitivity analyses include leave-one-out, cumulative meta-analysis, and influence diagnostics.
+**Pairwise meta-analysis.** The platform implements random-effects (DerSimonian-Laird [5]) and fixed-effect models. Four heterogeneity variance estimators are available: DerSimonian-Laird, restricted maximum likelihood (REML), Paule-Mandel, and empirical Bayes. The Hartung-Knapp-Sidik-Jonkman (HKSJ) adjustment [7] is provided for confidence interval construction under random effects; note that full sandwich/CR2 robust variance estimation is not currently implemented. Heterogeneity is reported as tau-squared, I-squared with confidence intervals [6], H-squared, and prediction intervals. Sensitivity analyses include leave-one-out, cumulative meta-analysis, and influence diagnostics.
 
-**Network meta-analysis.** Both Bayesian (Markov chain Monte Carlo) and frequentist approaches [4] are implemented. Treatment rankings use SUCRA [12] and P-score methods. Consistency is assessed via node-split models. Additional outputs include league tables, network geometry statistics, comparison-adjusted funnel plots, network meta-regression, and component NMA.
+**Network meta-analysis.** Both Bayesian (Gibbs sampler MCMC with Gelman-Rubin R-hat diagnostics) and frequentist approaches [4] are implemented. Treatment rankings use SUCRA [12] and P-score methods. Consistency is assessed via node-split models. Additional outputs include league tables, network geometry statistics, comparison-adjusted funnel plots, network meta-regression, and component NMA.
 
-**Publication bias.** Twelve methods are available: Egger's regression test [8], Begg's rank correlation, Duval and Tweedie trim-and-fill, Vevea-Hedges selection models, Copas selection model [9], PET-PEESE, contour-enhanced funnel plots, robust Bayesian model-averaging (RoBMA), Andrews-Kasy selection correction, and the Mathur-VanderWeele E-value for sensitivity to unmeasured confounding.
+**Publication bias.** Four validated methods are available: Egger's regression test [8], Begg's rank correlation, Copas selection model [9], and PET-PEESE. Contour-enhanced funnel plots are provided for visual assessment.
 
-**Specialised methods.** The platform includes three-level meta-analysis, multivariate meta-analysis, robust variance estimation (CR2 sandwich estimator), dose-response meta-analysis with restricted cubic splines, Bayesian model averaging, IPD meta-analysis (one-stage and two-stage), DTA meta-analysis (bivariate Reitsma model, HSROC), Mendelian randomisation (IVW, MR-Egger, weighted median, MR-PRESSO), and historical data borrowing (power priors, MAP priors, commensurate priors). A living systematic review module supports sequential updating with O'Brien-Fleming, Pocock, and Haybittle-Peto alpha-spending boundaries.
+**Specialised methods.** The platform includes three-level meta-analysis, Mendelian randomisation (IVW, MR-Egger, weighted median, MR-PRESSO), and historical data borrowing via power priors. Partitioned survival analysis is available for oncology HTA submissions.
 
 ### Probabilistic sensitivity analysis and value of information
 
-PSA samples model parameters from user-specified distributions (beta, gamma, lognormal, normal, uniform) using the seeded PCG32 generator. Cost-effectiveness planes, cost-effectiveness acceptability curves (CEACs), and expected net monetary benefit (NMB) are computed across a range of willingness-to-pay thresholds.
+PSA samples model parameters from user-specified distributions (beta, gamma, lognormal, normal) using the seeded PCG32 generator. Cost-effectiveness planes, cost-effectiveness acceptability curves (CEACs), and expected net monetary benefit (NMB) are computed across a range of willingness-to-pay thresholds.
 
-The expected value of perfect information (EVPI) [10] is computed from PSA output as the difference between the expected value of the decision made with perfect information and the expected value of the decision made with current information. Partial EVPI (EVPPI) for parameter subgroups uses a Gaussian approximation approach [11], trading computational efficiency against the full nested Monte Carlo estimator.
+The expected value of perfect information (EVPI) [10] is computed from PSA output as the difference between the expected value of the decision made with perfect information and the expected value of the decision made with current information. Partial EVPI (EVPPI) for parameter subgroups uses a GAM metamodeling approximation [11], trading computational efficiency against the full nested Monte Carlo estimator.
 
 ### Reporting and quality assessment
 
@@ -74,7 +74,7 @@ Users open `index.html` in a modern browser (Chrome 80+, Firefox 78+, Safari 14+
 
 ### Validation against R reference implementations
 
-Eight benchmark comparisons against the R metafor and meta packages were conducted for pairwise meta-analysis (DerSimonian-Laird and REML estimators, fixed-effect models, HKSJ adjustment, heterogeneity statistics). All eight tests passed within the specified tolerance.
+Eight pairwise meta-analysis benchmarks against R metafor v4.8-0 and meta were conducted (DerSimonian-Laird and REML estimators, fixed-effect models, HKSJ adjustment, heterogeneity statistics). All eight tests passed within the specified tolerance. Four publication bias methods (Egger, Begg, Copas, PET-PEESE) were validated against R equivalents. Bayesian NMA includes Gelman-Rubin R-hat convergence diagnostics for assessing chain mixing.
 
 Three Markov cohort reference fixtures (simple model, age-dependent transitions, and PSA demonstration) were validated against independently executed R scripts stored in `external-comparators/r/`. Agreement was assessed using absolute and relative error metrics. The maximum absolute error across all fixtures was 4.72 x 10^-5^ for cost outcomes and the maximum relative error was 1.14 x 10^-5^, both within the tolerance thresholds of 0.01 (costs) and 0.001 (relative).
 
@@ -91,17 +91,20 @@ Table 1 compares the capabilities of HTA Artifact Standard against established a
 | Interactive GUI | Yes (browser) | Yes (desktop) | No (CLI) | Yes | No |
 | No installation required | Yes | No | No | Yes | No |
 | Markov cohort models | Yes | Yes | Yes (heemod) | Yes | Yes |
-| Network meta-analysis | Yes | No | No | No | Yes |
-| Pairwise meta-analysis | Yes | No | Yes (metafor) | No | Yes |
-| PSA | Yes | Yes | Yes | Partial | Yes |
-| EVPI/EVPPI | Yes | Yes | Yes | No | Yes |
-| Publication bias (12 methods) | Yes | No | Partial (4-5 methods) | No | No |
-| Deterministic contract (PCG32) | Yes | No | No | No | No |
-| Risk-of-bias assessment | Yes (RoB 2, ROBINS-I) | No | No | No | No |
-| GRADE/CINeMA | Yes | No | No | No | Partial |
-| Dose-response MA | Yes | No | Yes (dosresmeta) | No | No |
+| Microsimulation | Yes | Yes | No | No | No |
+| Decision trees | Yes | Yes | Yes | Yes | No |
+| NMA (Bayesian Gibbs + frequentist) | Yes | No | No | No | Yes |
+| Pairwise MA (DL/REML/PM/EB + HKSJ) | Yes | No | Yes (metafor) | No | Yes |
 | Three-level MA | Yes | No | Yes (metafor) | No | No |
-| Living review module | Yes | No | No | No | No |
+| Publication bias (4 methods) | Yes | No | Partial (4-5 methods) | No | No |
+| Mendelian randomisation | Yes | No | Yes (MendelianRandomization) | No | No |
+| Power priors / historical borrowing | Yes | No | Partial | No | No |
+| Partitioned survival analysis | Yes | Yes | Yes (hesim) | No | Yes |
+| PSA (beta/gamma/normal/lognormal) | Yes | Yes | Yes | Partial | Yes |
+| EVPI/EVPPI | Yes | Yes | Yes | No | Yes |
+| Deterministic contract (PCG32) | Yes | No | No | No | No |
+| Risk-of-bias assessment (RoB 2, ROBINS-I) | Yes | No | No | No | No |
+| GRADE/CINeMA | Yes | No | No | No | Partial |
 | Open source | Yes (MIT) | No | Yes (GPL) | Varies | Partial |
 | Offline capable | Yes (PWA) | Yes | Yes | Yes | No |
 | Annual licence cost | Free | USD 6,000+ | Free | Free | Free |
@@ -118,7 +121,7 @@ A health economist evaluating a new intervention opens the platform, selects the
 
 ### Use case 2: network meta-analysis for HTA submission
 
-A systematic review team has extracted pairwise treatment comparisons from randomised controlled trials. The team enters effect estimates into the NMA module, which constructs the evidence network, runs both Bayesian and frequentist analyses, and produces SUCRA rankings and league tables. Node-split consistency tests identify potential incoherence. Publication bias is assessed using Egger's test and a contour-enhanced funnel plot. The pooled treatment effects are then imported directly into the Markov model as transition probability modifiers, maintaining a single auditable workflow from evidence synthesis to economic evaluation.
+A systematic review team has extracted pairwise treatment comparisons from randomised controlled trials. The team enters effect estimates into the NMA module, which constructs the evidence network, runs both Bayesian and frequentist analyses, and produces SUCRA rankings and league tables. Node-split consistency tests identify potential incoherence. Publication bias is assessed using Egger's test, Copas selection model, and a contour-enhanced funnel plot. The pooled treatment effects are then imported directly into the Markov model as transition probability modifiers, maintaining a single auditable workflow from evidence synthesis to economic evaluation.
 
 ### Use case 3: teaching and training
 
@@ -128,7 +131,7 @@ An instructor teaching HTA methods at a medical school uses the platform's begin
 
 HTA Artifact Standard addresses a practical gap in the HTA tooling landscape by consolidating economic modelling and evidence synthesis into a single browser-based environment. The deterministic execution contract, enforced through seeded PRNG and Kahan summation, provides a level of reproducibility assurance that is not standard in existing tools. The MIT licence and zero-installation requirement lower barriers to adoption in both research and educational settings.
 
-The platform's evidence synthesis capabilities extend well beyond what is available in commercial decision-modelling software. TreeAge Pro, the dominant commercial platform, does not implement any meta-analytic, publication bias, or quality assessment methods. While R provides excellent statistical implementations through packages such as metafor [3], meta, and netmeta, it requires programming proficiency and does not offer an integrated economic modelling interface. HTA Artifact Standard occupies a middle ground: it provides a guided interface for users who are not programmers, while maintaining analytical depth through its 45-module engine.
+The platform integrates evidence synthesis capabilities that are not typically available in commercial decision-modelling software. TreeAge Pro, the dominant commercial platform, does not implement meta-analytic, publication bias, or quality assessment methods. While R provides excellent statistical implementations through packages such as metafor [3], meta, and netmeta, it requires programming proficiency and does not offer an integrated economic modelling interface. HTA Artifact Standard occupies a middle ground: it provides a guided interface for users who are not programmers, while integrating pairwise and network meta-analysis, publication bias assessment, and Mendelian randomisation alongside economic modelling in a single environment.
 
 The validation strategy combines internal reference fixtures with external R comparator checks. This dual approach gives reasonable confidence in the core Markov engine, which achieves agreement with R to within 10^-5^ absolute error. However, the meta-analytic and specialised modules have not all been subjected to the same rigour of external benchmarking. Expanding the validation coverage is a priority for future versions.
 
@@ -138,29 +141,29 @@ Users should verify that model convergence is achieved before interpreting resul
 
 The following limitations should be considered when interpreting results from this platform:
 
-1. **Cohort-level Markov models only.** The Markov engine operates at the cohort level. Individual-level microsimulation is not supported, limiting the modelling of patient heterogeneity and history-dependent transitions.
+1. **Microsimulation scope.** Microsimulation is available but limited to discrete-time individual patient simulation; continuous-time and compartmental models are not supported.
 
-2. **Pre-computed effect estimates for NMA.** Network meta-analysis requires users to enter pre-computed effect sizes (e.g., log odds ratios with standard errors). Raw event count or continuous outcome data must be transformed externally before input.
+2. **Bayesian NMA uses Gibbs sampler.** The Bayesian NMA implementation uses a Gibbs sampler rather than Hamiltonian Monte Carlo (HMC/NUTS). Gelman-Rubin R-hat convergence diagnostics are provided, but users should verify adequate chain mixing before interpreting results.
 
-3. **EVPPI uses Gaussian approximation.** The EVPPI module uses a Gaussian approximation approach [11] rather than full nested Monte Carlo simulation. This is computationally efficient but may underestimate EVPPI for highly skewed or multimodal parameter distributions.
+3. **No individual participant data support.** IPD meta-analysis is not implemented. All meta-analytic methods operate on summary-level data.
 
-4. **No individual participant data support.** Although IPD meta-analysis methods are implemented, they operate on summary-level reconstructions rather than true individual-level datasets.
+4. **Limited PSA distribution types.** Four distribution families are available (beta, gamma, lognormal, normal). Empirical or non-parametric distributions, Dirichlet distributions for multinomial parameters, and correlated sampling are not currently supported.
 
-5. **Limited PSA distribution types.** Five distribution families are available (beta, gamma, lognormal, normal, uniform). Empirical or non-parametric distributions, Dirichlet distributions for multinomial parameters, and correlated sampling are not currently supported.
+5. **EVPPI uses GAM metamodeling approximation.** The EVPPI module uses a GAM metamodeling approximation [11] rather than full nested Monte Carlo simulation. This is computationally efficient but may underestimate EVPPI for highly skewed or multimodal parameter distributions.
 
-6. **CDN dependency for visualisations.** Chart.js and D3.js are loaded from CDN on first access. While the Service Worker caches these for subsequent offline use, the initial load requires an internet connection.
+6. **Publication bias limited to four methods.** The platform implements Egger's regression test, Begg's rank correlation, Copas selection model, and PET-PEESE. Other methods (e.g., trim-and-fill, selection models, RoBMA) are not available.
 
-7. **Test coverage.** Unit test coverage is approximately 45% across all modules, with enforced thresholds applied only to the Markov engine, expression parser, and sanitisation modules. The meta-analytic and specialised modules rely primarily on integration testing through benchmark comparisons rather than comprehensive unit tests.
+7. **No dose-response meta-analysis.** Dose-response modelling is not implemented in the current version.
 
-8. **No formal usability evaluation.** The platform has not undergone formal usability testing with a diverse sample of HTA practitioners. Interface design decisions are based on the development team's domain experience rather than empirical user research.
+8. **Test coverage.** Unit test coverage is approximately 45% across all modules, with enforced thresholds applied only to the Markov engine, expression parser, and sanitisation modules. The meta-analytic and specialised modules rely primarily on integration testing through benchmark comparisons rather than comprehensive unit tests.
 
-9. **Bayesian NMA convergence diagnostics.** The Bayesian MCMC implementation does not currently report R-hat statistics or trace plots for convergence assessment. Users should exercise caution when interpreting Bayesian NMA results without independent convergence verification.
+9. **No formal usability evaluation.** The platform has not undergone formal usability testing with a diverse sample of HTA practitioners. Interface design decisions are based on the development team's domain experience rather than empirical user research.
 
-10. **No WebR integration.** Planned integration with WebR for in-browser R validation has not yet been implemented. Cross-validation currently relies on offline R scripts in the `external-comparators/` directory.
+10. **CDN dependency for visualisations.** Chart.js and D3.js are loaded from CDN on first access. While the Service Worker caches these for subsequent offline use, the initial load requires an internet connection.
 
 ### Future development
 
-Version 0.7 will target expanded external validation fixtures, WebR integration for in-browser cross-validation, microsimulation capabilities, and convergence diagnostics for Bayesian NMA. A formal usability study with HTA practitioners across clinical and academic settings is planned.
+Version 0.7 will target expanded external validation fixtures, WebR integration for in-browser cross-validation, additional PSA distribution types (Dirichlet, empirical), dose-response meta-analysis, and IPD meta-analysis support. A formal usability study with HTA practitioners across clinical and academic settings is planned.
 
 ## Software availability
 
@@ -177,19 +180,19 @@ An `renv.lock` file is included to pin R package versions (R 4.5.2, metafor 4.8-
 
 No new clinical or participant-level data were generated for this article. Demonstration datasets and reference model fixtures are included in the source repository under `reference-models/`. R comparator scripts and outputs are available under `external-comparators/r/`.
 
+## Competing interests
+
+No competing interests were disclosed.
+
 ## Author contributions
 
 | Author | CRediT roles |
 |---|---|
-| Mahmood Ahmad | Conceptualisation, Methodology, Software, Validation, Data curation, Writing -- original draft, Writing -- review and editing |
-| Niraj Kumar | Conceptualisation, Writing -- review and editing |
-| Bilaal Dar | Conceptualisation, Writing -- review and editing |
-| Laiba Khan | Conceptualisation, Writing -- review and editing |
-| Andrew Woo | Conceptualisation, Writing -- review and editing |
-
-## Competing interests
-
-No competing interests were disclosed.
+| Mahmood Ahmad | Conceptualization, Methodology, Software, Validation, Writing - original draft, Writing - review & editing |
+| Niraj Kumar | Conceptualization, Writing - review & editing |
+| Bilaal Dar | Conceptualization, Writing - review & editing |
+| Laiba Khan | Conceptualization, Writing - review & editing |
+| Andrew Woo | Conceptualization, Writing - review & editing |
 
 ## Grant information
 
