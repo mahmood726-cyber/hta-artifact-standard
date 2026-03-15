@@ -151,9 +151,9 @@ The following limitations should be considered when interpreting results from th
 
 5. **EVPPI uses GAM metamodeling approximation.** The EVPPI module uses a GAM metamodeling approximation [11] rather than full nested Monte Carlo simulation. This is computationally efficient but may underestimate EVPPI for highly skewed or multimodal parameter distributions.
 
-6. **Publication bias limited to four methods.** The platform implements Egger's regression test, Begg's rank correlation, Copas selection model, and PET-PEESE. Other methods (e.g., trim-and-fill, selection models, RoBMA) are not available.
+6. **Publication bias limited to five methods.** The platform implements Egger's regression test, Begg's rank correlation, Copas selection model, PET-PEESE, and trim-and-fill (with L0, R0, and Q estimators). Other methods (e.g., RoBMA with full posterior sampling) are not available.
 
-7. **No dose-response meta-analysis.** Dose-response modelling is not implemented in the current version.
+7. **Dose-response meta-analysis limited.** Dose-response modelling supports the Emax model (Gauss-Newton nonlinear least squares), linear dose-response, and restricted cubic splines. Fractional polynomial and sigmoid Emax models are not implemented.
 
 8. **Test coverage.** Unit test coverage is approximately 45% across all modules, with enforced thresholds applied only to the Markov engine, expression parser, and sanitisation modules. The meta-analytic and specialised modules rely primarily on integration testing through benchmark comparisons rather than comprehensive unit tests.
 
@@ -163,7 +163,7 @@ The following limitations should be considered when interpreting results from th
 
 ### Future development
 
-Version 0.7 will target expanded external validation fixtures, WebR integration for in-browser cross-validation, additional PSA distribution types (Dirichlet, empirical), dose-response meta-analysis, and IPD meta-analysis support. A formal usability study with HTA practitioners across clinical and academic settings is planned.
+Version 0.7 will target expanded external validation fixtures, WebR integration for in-browser cross-validation, additional PSA distribution types (Dirichlet, empirical), and IPD meta-analysis support. A formal usability study with HTA practitioners across clinical and academic settings is planned.
 
 ## Software availability
 
