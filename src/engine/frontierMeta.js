@@ -350,15 +350,28 @@ class IPDMetaAnalysis {
             if (diff < 1e-8) break;
         }
 
+        // Standard errors from weighted information matrix (X'WX)^{-1}
+        // where W = diag(mu_i * (1 - mu_i)) — the IRLS working weights
+        // Note: simple X'X inverse would ignore the binomial variance function
         const varNames = Object.keys(X[0]);
-        const XtX = this._multiplyMatrices(this._transpose(X), X);
-        const XtXinv = this._invertMatrix(XtX);
+        const eta = this._multiplyMatrixVector(X, beta);
+        const mu = eta.map(e => 1 / (1 + Math.exp(-e)));
+        const W = mu.map((m) => m * (1 - m));
+
+        const sqrtW = W.map(w => Math.sqrt(Math.max(w, 1e-10)));
+        const Xw = X.map((row, i) => {
+            const newRow = {};
+            Object.keys(row).forEach(key => newRow[key] = row[key] * sqrtW[i]);
+            return newRow;
+        });
+        const XtWX = this._multiplyMatrices(this._transpose(Xw), Xw);
+        const XtWXinv = this._invertMatrix(XtWX);
 
         const fixedEffects = {};
         varNames.forEach((name, i) => {
             fixedEffects[name] = {
                 estimate: beta[i],
-                se: Math.sqrt(XtXinv[i][i])
+                se: Math.sqrt(XtWXinv[i][i])
             };
         });
 
@@ -373,16 +386,39 @@ class IPDMetaAnalysis {
     }
 
     _fitCoxMixedModel(data, X, Z, studies, outcomeVar) {
-        // Shared frailty Cox model
-        // Simplified implementation using partial likelihood
+        // Shared frailty Cox model with EM-estimated frailty variance
+        // Reference: Therneau & Grambsch (2000), Modeling Survival Data, Ch. 9
+        // Reference: Ripatti & Palmgren (2000), Biometrics 56:1016-1022
 
         const times = data.map(d => d[outcomeVar].time);
         const events = data.map(d => d[outcomeVar].event);
+        const n = data.length;
+        const k = studies.length;
 
         // Sort by time
         const order = times.map((t, i) => i).sort((a, b) => times[a] - times[b]);
 
-        // Newton-Raphson for Cox partial likelihood
+        // Map each observation to its study index using Z matrix
+        const studyMap = new Array(n);
+        for (let i = 0; i < n; i++) {
+            for (let j = 0; j < studies.length; j++) {
+                if (Z[i][`intercept_${studies[j]}`] === 1) {
+                    studyMap[i] = j;
+                    break;
+                }
+            }
+        }
+
+        // Count events per study
+        const dj = new Array(k).fill(0);
+        const nj = new Array(k).fill(0);
+        for (let i = 0; i < n; i++) {
+            const j = studyMap[i];
+            nj[j]++;
+            if (events[i]) dj[j]++;
+        }
+
+        // Newton-Raphson for Cox partial likelihood (initial fit without frailty)
         let beta = new Array(Object.keys(X[0]).length - 1).fill(0); // Exclude intercept
 
         for (let iter = 0; iter < 50; iter++) {
@@ -395,10 +431,54 @@ class IPDMetaAnalysis {
             if (diff < 1e-8) break;
         }
 
+        // EM algorithm for frailty variance (theta = frailty variance parameter)
+        // Under gamma frailty: w_j ~ Gamma(1/theta, 1/theta), E[w_j]=1, Var[w_j]=theta
+        // E-step: E[w_j|data] = (d_j + 1/theta) / (H_j + 1/theta)
+        // M-step: theta = variance of posterior frailties
+        let theta = 0.5; // Initial frailty variance estimate
+        const frailtyW = new Array(k).fill(1.0);
+
+        for (let emIter = 0; emIter < 100; emIter++) {
+            // Compute cumulative hazard per study (Breslow estimator)
+            const Hj = this._computeStudyCumulativeHazard(times, events, X, beta, order, studyMap, k);
+
+            // E-step: posterior frailty expectations
+            const invTheta = theta > 1e-10 ? 1 / theta : 1e10;
+            for (let j = 0; j < k; j++) {
+                frailtyW[j] = (dj[j] + invTheta) / (Hj[j] + invTheta);
+            }
+
+            // M-step: update theta from dispersion of posterior frailties
+            const meanW = frailtyW.reduce((a, b) => a + b, 0) / k;
+            const varW = frailtyW.reduce((sum, w) => sum + (w - meanW) ** 2, 0) / (k - 1);
+            const newTheta = Math.max(0, varW);
+
+            // Check convergence
+            if (Math.abs(newTheta - theta) < 1e-6) {
+                theta = newTheta;
+                break;
+            }
+            theta = newTheta;
+        }
+
+        // Method-of-moments fallback if EM yields zero (e.g., few studies)
+        // Q-based: sigma2_u0 = max(0, (Q - (k-1)) / C)
+        if (k >= 2 && theta < 1e-10) {
+            const studyEffects = this._computeStudySpecificCoxEffects(data, X, studies, studyMap, outcomeVar);
+            if (studyEffects.length >= 2) {
+                const weights = studyEffects.map(s => 1 / (s.se * s.se));
+                const sumW = weights.reduce((a, b) => a + b, 0);
+                const weightedMean = studyEffects.reduce((sum, s, i) => sum + weights[i] * s.estimate, 0) / sumW;
+                const Q = studyEffects.reduce((sum, s, i) => sum + weights[i] * Math.pow(s.estimate - weightedMean, 2), 0);
+                const C = sumW - weights.reduce((sum, w) => sum + w * w, 0) / sumW;
+                theta = Math.max(0, (Q - (k - 1)) / C);
+            }
+        }
+
         const { hessian } = this._coxScoreHessian(times, events, X, beta, order);
         const varMatrix = this._invertMatrix(hessian);
 
-        const varNames = Object.keys(X[0]).filter(k => k !== 'intercept');
+        const varNames = Object.keys(X[0]).filter(kk => kk !== 'intercept');
         const fixedEffects = {};
         varNames.forEach((name, i) => {
             fixedEffects[name] = {
@@ -407,14 +487,106 @@ class IPDMetaAnalysis {
             };
         });
 
+        // BLUPs: posterior frailty deviations (log-frailty scale)
+        const blups = studies.map((s, j) => ({
+            study: s,
+            blup: Math.log(frailtyW[j]),
+            frailty: frailtyW[j]
+        }));
+
         return {
             fixedEffects,
-            sigma2_u0: 0, // Placeholder
+            sigma2_u0: theta, // Estimated frailty variance (gamma frailty)
             sigma2_e: 1,
-            blups: [],
+            blups,
             logLik: this._coxPartialLogLik(times, events, X, beta, order),
-            nParams: varNames.length
+            nParams: varNames.length + 1 // +1 for frailty variance
         };
+    }
+
+    /**
+     * Compute Breslow cumulative hazard per study
+     * H_j = sum of baseline hazard increments weighted by study j's exposure
+     */
+    _computeStudyCumulativeHazard(times, events, X, beta, order, studyMap, k) {
+        const n = times.length;
+        const Hj = new Array(k).fill(0);
+
+        // Compute linear predictor for each observation
+        const varNames = Object.keys(X[0]).filter(key => key !== 'intercept');
+        const lp = new Array(n);
+        for (let i = 0; i < n; i++) {
+            lp[i] = 0;
+            varNames.forEach((name, j) => {
+                lp[i] += beta[j] * (X[i][name] || 0);
+            });
+        }
+
+        const expLp = lp.map(l => Math.exp(l));
+
+        // Process events in time order: at each event time, dLambda0 = 1/riskSum
+        for (let idx = 0; idx < n; idx++) {
+            const i = order[idx];
+            if (!events[i]) continue;
+
+            // Risk set: all subjects with time >= times[i]
+            let riskSum = 0;
+            for (let idx2 = idx; idx2 < n; idx2++) {
+                riskSum += expLp[order[idx2]];
+            }
+
+            if (riskSum < 1e-10) continue;
+            const dLambda0 = 1 / riskSum;
+
+            // Accumulate cumulative hazard per study
+            for (let idx2 = idx; idx2 < n; idx2++) {
+                const ii = order[idx2];
+                Hj[studyMap[ii]] += expLp[ii] * dLambda0;
+            }
+        }
+
+        return Hj;
+    }
+
+    /**
+     * Compute study-specific Cox effects for method-of-moments fallback
+     * Returns log-HR estimates + SEs per study (rate ratio approximation)
+     */
+    _computeStudySpecificCoxEffects(data, X, studies, studyMap, outcomeVar) {
+        const results = [];
+        const varNames = Object.keys(X[0]).filter(kk => kk !== 'intercept');
+        if (varNames.length === 0) return results;
+
+        for (let j = 0; j < studies.length; j++) {
+            const indices = [];
+            for (let i = 0; i < data.length; i++) {
+                if (studyMap[i] === j) indices.push(i);
+            }
+
+            if (indices.length < 2) continue;
+
+            const dEvents = indices.filter(i => data[i][outcomeVar].event).length;
+            if (dEvents < 1) continue;
+
+            const nTreat = indices.filter(i => (X[i][varNames[0]] || 0) === 1).length;
+            const nControl = indices.length - nTreat;
+            if (nTreat < 1 || nControl < 1) continue;
+
+            const eventsTreat = indices.filter(i => (X[i][varNames[0]] || 0) === 1 && data[i][outcomeVar].event).length;
+            const eventsControl = dEvents - eventsTreat;
+
+            if (eventsTreat < 1 || eventsControl < 1) continue;
+
+            // Log rate ratio as proxy for log-HR
+            const rateTreat = eventsTreat / nTreat;
+            const rateControl = eventsControl / nControl;
+            const logHR = Math.log(rateTreat / rateControl);
+            const se = Math.sqrt(1 / eventsTreat + 1 / eventsControl);
+
+            results.push({ estimate: logHR, se });
+        }
+
+        return results;
     }
 
     _calculateInteractions(data, treatmentVar, covariates, modelResult) {
@@ -13794,7 +13966,19 @@ class GRADEMethodology {
     }
 
     _assessDoseResponse(evidence) {
-        return { level: 'no', upgrade: 0, rationale: 'No clear dose-response' };
+        if (!evidence || !evidence.studies) return { level: 'no', upgrade: 0, rationale: 'No dose-response data available' };
+        const doseLevels = new Set(evidence.studies.map(s => s.dose)).size;
+        if (doseLevels < 3) return { level: 'no', upgrade: 0, rationale: 'Fewer than 3 dose levels' };
+        // Check for monotonic trend
+        const sorted = [...evidence.studies].sort((a, b) => (a.dose || 0) - (b.dose || 0));
+        let monotonic = true;
+        for (let i = 1; i < sorted.length; i++) {
+            if (sorted[i].yi < sorted[i - 1].yi - 0.01) { monotonic = false; break; }
+        }
+        if (monotonic && doseLevels >= 3) {
+            return { level: 'yes', upgrade: 1, rationale: `Monotonic dose-response across ${doseLevels} dose levels supports upgrading certainty` };
+        }
+        return { level: 'possible', upgrade: 0, rationale: `${doseLevels} dose levels present but no clear monotonic pattern` };
     }
 
     _assessConfoundingOpposing(evidence) {

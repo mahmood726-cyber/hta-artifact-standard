@@ -24,6 +24,14 @@ class AdvancedMetaAnalysis {
             alpha: 0.05,
             ...options
         };
+        // Seeded PRNG (LCG) for reproducibility — avoid Math.random()
+        this._rngState = options.seed ?? 12345;
+    }
+
+    /** Seeded uniform random in (0, 1) */
+    _seededRandom() {
+        this._rngState = (this._rngState * 1103515245 + 12345) & 0x7fffffff;
+        return this._rngState / 0x7fffffff || 1e-10; // avoid exact 0
     }
 
     // ============================================================
@@ -641,6 +649,7 @@ class AdvancedMetaAnalysis {
         const se = XtWXinv.map((row, i) => Math.sqrt(row[i]));
 
         // Generate dose-response curve
+        const zCrit = this.normalQuantile(1 - this.options.alpha / 2);
         const doseRange = this.linspace(Math.min(...doses), Math.max(...doses), 100);
         const curve = doseRange.map(dose => {
             const spline = this.restrictedCubicSpline([dose], knots)[0];
@@ -654,8 +663,8 @@ class AdvancedMetaAnalysis {
                 dose: dose,
                 effect: pred,
                 se: sePred,
-                ciLower: pred - 1.96 * sePred,
-                ciUpper: pred + 1.96 * sePred
+                ciLower: pred - zCrit * sePred,
+                ciUpper: pred + zCrit * sePred
             };
         });
 
@@ -990,7 +999,7 @@ class AdvancedMetaAnalysis {
         // Generate posterior samples for uncertainty
         for (let iter = 0; iter < opts.nIterations; iter++) {
             // Sample model
-            const u = Math.random();
+            const u = this._seededRandom();
             let cumProb = 0;
             let selectedModel = 0;
             for (let i = 0; i < posteriorProbs.length; i++) {
@@ -1582,9 +1591,8 @@ class AdvancedMetaAnalysis {
     }
 
     randomNormal() {
-        let u = 0, v = 0;
-        while (u === 0) u = Math.random();
-        while (v === 0) v = Math.random();
+        let u = this._seededRandom();
+        let v = this._seededRandom();
         return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
     }
 
@@ -1880,6 +1888,100 @@ class AdvancedMetaAnalysis {
 
         return { statistic: waldStat, df, pValue };
     }
+
+    // ============================================================
+    // EMAX DOSE-RESPONSE MODEL
+    // E(d) = E0 + Emax * d / (ED50 + d)
+    // ============================================================
+
+    /**
+     * Emax dose-response model via Gauss-Newton nonlinear least squares
+     * Reference: Thomas et al (2014) - Dose-response meta-analysis
+     */
+    doseResponseEmax(studies, options = {}) {
+        const doses = studies.map(s => s.dose);
+        const effects = studies.map(s => s.yi);
+        const weights = studies.map(s => 1 / (s.vi || 0.01));
+        const k = studies.length;
+
+        if (k < 3) return { error: 'Emax model requires at least 3 dose levels' };
+
+        // Initial parameter estimates
+        let E0 = effects[0] || 0;
+        let Emax = Math.max(...effects) - E0;
+        let ED50 = doses[Math.floor(k / 2)] || 1;
+
+        // Gauss-Newton nonlinear least squares
+        const maxIter = 100;
+        const tol = 1e-8;
+
+        for (let iter = 0; iter < maxIter; iter++) {
+            // Residuals and Jacobian
+            const r = [], J = [];
+            for (let i = 0; i < k; i++) {
+                const d = doses[i];
+                const pred = E0 + Emax * d / (ED50 + d);
+                const w = Math.sqrt(weights[i]);
+                r.push(w * (effects[i] - pred));
+
+                // Partial derivatives
+                const dE0 = -w;
+                const dEmax = -w * d / (ED50 + d);
+                const dED50 = w * Emax * d / ((ED50 + d) * (ED50 + d));
+                J.push([dE0, dEmax, dED50]);
+            }
+
+            // Normal equations: (J'J) delta = J'r
+            const JtJ = [[0,0,0],[0,0,0],[0,0,0]];
+            const Jtr = [0, 0, 0];
+            for (let i = 0; i < k; i++) {
+                for (let a = 0; a < 3; a++) {
+                    Jtr[a] += J[i][a] * r[i];
+                    for (let b = 0; b < 3; b++) {
+                        JtJ[a][b] += J[i][a] * J[i][b];
+                    }
+                }
+            }
+
+            // Solve 3x3 system via Cramer's rule
+            const det3 = (m) => m[0][0]*(m[1][1]*m[2][2]-m[1][2]*m[2][1]) - m[0][1]*(m[1][0]*m[2][2]-m[1][2]*m[2][0]) + m[0][2]*(m[1][0]*m[2][1]-m[1][1]*m[2][0]);
+            const D = det3(JtJ);
+            if (Math.abs(D) < 1e-15) break;
+
+            const delta = [0, 0, 0];
+            for (let j = 0; j < 3; j++) {
+                const M = JtJ.map(row => [...row]);
+                for (let i = 0; i < 3; i++) M[i][j] = Jtr[i];
+                delta[j] = det3(M) / D;
+            }
+
+            E0 += delta[0];
+            Emax += delta[1];
+            ED50 = Math.max(0.001, ED50 + delta[2]);
+
+            if (Math.abs(delta[0]) + Math.abs(delta[1]) + Math.abs(delta[2]) < tol) break;
+        }
+
+        // Fitted values and R-squared
+        let ss_res = 0, ss_tot = 0;
+        const meanEffect = effects.reduce((a, b) => a + b, 0) / k;
+        const fitted = doses.map(d => E0 + Emax * d / (ED50 + d));
+        for (let i = 0; i < k; i++) {
+            ss_res += weights[i] * (effects[i] - fitted[i]) ** 2;
+            ss_tot += weights[i] * (effects[i] - meanEffect) ** 2;
+        }
+        const R2 = ss_tot > 0 ? 1 - ss_res / ss_tot : 0;
+
+        return {
+            model: 'Emax',
+            parameters: { E0, Emax, ED50 },
+            fitted,
+            doses,
+            R2,
+            k,
+            interpretation: `Emax model: maximum effect ${Emax.toFixed(4)} achieved at high doses, half-maximal dose ED50 = ${ED50.toFixed(2)}. R² = ${R2.toFixed(3)}.`
+        };
+    }
 }
 
 // Living Systematic Review Engine
@@ -1949,7 +2051,7 @@ class LivingReviewEngine {
         return {
             currentEstimate: result.mu,
             se: result.se,
-            ci: [result.mu - 1.96 * result.se, result.mu + 1.96 * result.se],
+            ci: [result.mu - criticalValue * result.se, result.mu + criticalValue * result.se],
             tau2: result.tau2,
             zStatistic: zStat,
             criticalValue: criticalValue,
@@ -1959,6 +2061,7 @@ class LivingReviewEngine {
             conditionalPower: conditionalPower,
             informationFraction: infoFraction,
             alphaSpent: alphaSpent,
+            incrementalAlpha: this._incrementalAlpha(look),
             cumulativeAlpha: this.history.reduce((s, h) => s + h.alphaSpent, 0),
             look: look,
             nStudies: allStudies.length,
@@ -1970,12 +2073,23 @@ class LivingReviewEngine {
 
     alphaSpending(t, boundary) {
         const alpha = this.options.alpha;
+        t = Math.min(Math.max(t, 0), 1); // Clamp to [0, 1]
 
         if (boundary === 'OBrien-Fleming') {
             // O'Brien-Fleming spending function
-            return 2 * (1 - this.normalCDF(this.normalQuantile(1 - alpha / 2) / Math.sqrt(t)));
+            const zAlpha = this.normalQuantile(1 - alpha / 2);
+            return 2 * (1 - this.normalCDF(zAlpha / Math.sqrt(Math.max(t, 1e-10))));
         } else if (boundary === 'Pocock') {
             // Pocock spending function
+            return alpha * Math.log(1 + (Math.E - 1) * t);
+        } else if (boundary === 'Lan-DeMets-OBF') {
+            // Lan-DeMets generalization of O'Brien-Fleming
+            // alpha*(t) = 2 - 2*Phi(z_{alpha/2} / sqrt(t))
+            const zAlpha = this.normalQuantile(1 - alpha / 2);
+            return Math.max(0, 2 - 2 * this.normalCDF(zAlpha / Math.sqrt(Math.max(t, 1e-10))));
+        } else if (boundary === 'Lan-DeMets-Pocock') {
+            // Lan-DeMets generalization of Pocock
+            // alpha*(t) = alpha * ln(1 + (e-1)*t)
             return alpha * Math.log(1 + (Math.E - 1) * t);
         } else if (boundary === 'Haybittle-Peto') {
             // Fixed boundaries except final
@@ -1986,13 +2100,60 @@ class LivingReviewEngine {
         }
     }
 
+    /**
+     * Incremental alpha spent at the current look
+     * Uses alpha(t_k) - alpha(t_{k-1}) for proper cumulative spending
+     */
+    _incrementalAlpha(currentLook) {
+        if (currentLook <= 1) return this.history.length > 0 ? this.history[0].alphaSpent : 0;
+        const prevCumulative = this.history.slice(0, currentLook - 1).reduce((s, h) => s + h.alphaSpent, 0);
+        const currentCumulative = this.history.slice(0, currentLook).reduce((s, h) => s + h.alphaSpent, 0);
+        return Math.max(0, currentCumulative - prevCumulative);
+    }
+
+    /**
+     * Required Information Size (RIS) calculation
+     * D = (z_alpha + z_beta)^2 / theta^2
+     * Reference: Wetterslev et al (2008) - Trial Sequential Analysis
+     */
+    requiredInformationSize(options = {}) {
+        const {
+            theta = 0.2,         // Target effect size
+            power = 0.8,         // Desired power (1 - beta)
+            alpha = this.options.alpha,
+            heterogeneity = 0    // tau^2 adjustment (diversity D^2)
+        } = options;
+
+        const zAlpha = this.normalQuantile(1 - alpha / 2);
+        const zBeta = this.normalQuantile(power);
+        const D = (zAlpha + zBeta) ** 2 / (theta ** 2);
+
+        // Adjust for heterogeneity if present (DARIS = D / (1 - diversity))
+        const diversityAdjusted = heterogeneity > 0 ? D / Math.max(1 - heterogeneity, 0.01) : D;
+
+        return {
+            ris: D,
+            risAdjusted: diversityAdjusted,
+            zAlpha,
+            zBeta,
+            theta,
+            power,
+            interpretation: `Required information size: ${D.toFixed(1)} (unadjusted)${heterogeneity > 0 ? `, ${diversityAdjusted.toFixed(1)} (heterogeneity-adjusted)` : ''}`
+        };
+    }
+
     calculateInformation(studies) {
         // Fisher information = sum of 1/variance
-        return studies.reduce((sum, s) => sum + 1 / s.vi, 0);
+        return studies.reduce((sum, s) => sum + 1 / (s.vi || 1), 0);
     }
 
     estimateMaxInformation(studies, opts) {
-        // Estimate maximum information based on current data
+        // Estimate maximum information based on RIS if theta available, else heuristic
+        if (opts.theta) {
+            const ris = this.requiredInformationSize({ theta: opts.theta, power: opts.power || 0.8 });
+            return ris.risAdjusted || ris.ris;
+        }
+        // Fallback: heuristic based on current data
         const currentInfo = this.calculateInformation(studies);
         const avgInfoPerStudy = currentInfo / studies.length;
         const expectedTotalStudies = studies.length * 2; // Assumption

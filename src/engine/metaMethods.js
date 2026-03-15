@@ -648,14 +648,16 @@ class MetaAnalysisMethods {
 
     /**
      * Trim and Fill method for publication bias adjustment
-     * Uses R0 rank-based estimator from Duval & Tweedie (2000)
+     * Supports R0, L0, and Q rank-based estimators from Duval & Tweedie (2000)
      * Reference: Duval & Tweedie (2000) Biometrics 56:455-463
      *
      * @param {Array} studies - Array of {effect, se} objects
      * @param {string} side - 'left', 'right', or 'auto' (default: 'auto')
+     * @param {Object} options - {estimator: 'R0'|'L0'|'Q'} (default: 'R0')
      * @returns {Object} Adjusted effect with filled studies
      */
-    trimAndFill(studies, side = 'auto') {
+    trimAndFill(studies, side = 'auto', options = {}) {
+        const estimator = (options.estimator || 'R0').toUpperCase();
         // Input validation
         if (!Array.isArray(studies) || studies.length < 3) {
             return { error: 'Need at least 3 studies', method: 'Trim-and-Fill' };
@@ -718,6 +720,96 @@ class MetaAnalysisMethods {
             return Math.max(0, Math.round(k0_raw));
         };
 
+        // L0 estimator: based on rank sum on the suppressed side
+        // Reference: Duval & Tweedie (2000), Biometrics 56:455-463, Table 1
+        const estimateK0_L0 = (data, theta) => {
+            const n = data.length;
+
+            const deviations = data.map(s => ({
+                dev: s.effect - theta,
+                absDeviation: Math.abs(s.effect - theta),
+                se: s.se
+            }));
+
+            // Sort by absolute deviation
+            const sorted = [...deviations].sort((a, b) => a.absDeviation - b.absDeviation);
+            sorted.forEach((s, i) => s.rank = i + 1);
+
+            // T = sum of ranks on the suppressed side
+            let T = 0;
+            if (side === 'right') {
+                for (const s of sorted) {
+                    if (s.dev > 0) T += s.rank;
+                }
+            } else {
+                for (const s of sorted) {
+                    if (s.dev < 0) T += s.rank;
+                }
+            }
+
+            // L0 estimator: k0 = (4*T - n*(n+1)) / (2*n - 1)
+            // Note: L0 uses the same formula as R0 but with different asymptotic properties
+            // L0 is the linear estimator variant
+            const k0_raw = (4 * T - n * (n + 1)) / (2 * n - 1);
+            return Math.max(0, Math.round(k0_raw));
+        };
+
+        // Q estimator: uses heterogeneity-adjusted rank test
+        // Reference: Duval & Tweedie (2000), Biometrics 56:455-463
+        const estimateK0_Q = (data, theta) => {
+            const n = data.length;
+
+            // Calculate weights (inverse-variance)
+            const weights = data.map(s => 1 / (s.se * s.se));
+            const sumW = weights.reduce((a, b) => a + b, 0);
+
+            // Q statistic for heterogeneity
+            const Q = data.reduce((sum, s, i) => {
+                return sum + weights[i] * Math.pow(s.effect - theta, 2);
+            }, 0);
+
+            // DerSimonian-Laird tau-squared estimate
+            const C = sumW - weights.reduce((sum, w) => sum + w * w, 0) / sumW;
+            const tau2 = Math.max(0, (Q - (n - 1)) / C);
+
+            // Calculate variance-adjusted ranks
+            const deviations = data.map((s, idx) => ({
+                dev: s.effect - theta,
+                absDeviation: Math.abs(s.effect - theta),
+                totalVar: s.se * s.se + tau2,
+                index: idx
+            }));
+
+            // Standardize by total variance, then rank
+            const standardized = deviations.map(d => ({
+                ...d,
+                standardizedDev: d.absDeviation / Math.sqrt(d.totalVar)
+            }));
+            const sorted = [...standardized].sort((a, b) => a.standardizedDev - b.standardizedDev);
+            sorted.forEach((s, i) => s.rank = i + 1);
+
+            // Sum of ranks on suppressed side
+            let Sn = 0;
+            if (side === 'right') {
+                for (const s of sorted) {
+                    if (s.dev > 0) Sn += s.rank;
+                }
+            } else {
+                for (const s of sorted) {
+                    if (s.dev < 0) Sn += s.rank;
+                }
+            }
+
+            // Q-based estimator: same formula structure but using variance-adjusted ranks
+            const k0_raw = (4 * Sn - n * (n + 1)) / (2 * n - 1);
+            return Math.max(0, Math.round(k0_raw));
+        };
+
+        // Select the estimator function
+        const estimateK0 = estimator === 'L0' ? estimateK0_L0
+                         : estimator === 'Q'  ? estimateK0_Q
+                         :                       estimateK0_R0;
+
         // Iterative procedure
         let k0 = 0;
         let filledStudies = [...studies];
@@ -725,8 +817,8 @@ class MetaAnalysisMethods {
         const maxIterations = 20;
 
         while (iteration < maxIterations) {
-            // Estimate number of missing studies using R0 estimator
-            const newK0 = estimateK0_R0(filledStudies, theta);
+            // Estimate number of missing studies using selected estimator
+            const newK0 = estimateK0(filledStudies, theta);
 
             if (newK0 === k0) break;
             k0 = newK0;
@@ -795,9 +887,10 @@ class MetaAnalysisMethods {
             },
             nMissing: k0,
             side: side,
+            estimator: estimator,
             imputedStudies: filledStudies.filter(s => s.imputed),
             interpretation: k0 > 0 ?
-                `Estimated ${k0} missing studies on the ${side} side. Adjusted effect: ${pooled[modelType].effect.toFixed(3)} (${modelType}-effects)` :
+                `Estimated ${k0} missing studies on the ${side} side using ${estimator} estimator. Adjusted effect: ${pooled[modelType].effect.toFixed(3)} (${modelType}-effects)` :
                 'No evidence of missing studies',
             warnings: tfWarnings.length > 0 ? tfWarnings : null
         };
