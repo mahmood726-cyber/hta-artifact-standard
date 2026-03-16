@@ -1,0 +1,87 @@
+{
+  "name": "hta-artifact-standard",
+  "version": "0.8.0",
+  "description": "HTA Artifact Standard - Open-source Health Technology Assessment Platform",
+  "main": "index.html",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src/**/*.js",
+    "build": "node scripts/build.js",
+    "serve": "npx serve .",
+    "review:panel": "node scripts/methodologist_review.js",
+    "validate:reference": "node scripts/reference_validation.js",
+    "validate:determinism": "node scripts/determinism_check.js --runs=12",
+    "bench:ci": "node scripts/performance_benchmark.js --iterations=30 --warmup=4",
+    "coverage:report": "node scripts/coverage_report.js",
+    "external:export:r": "node scripts/run_r_export.js",
+    "external:sync": "node scripts/sync_external_comparators.js",
+    "external:refresh": "npm run external:export:r && npm run external:sync",
+    "quality:gate": "npm run lint && npm run test:coverage -- --runInBand && npm run validate:reference && npm run validate:determinism && npm run bench:ci && npm run build"
+  },
+  "keywords": ["hta", "health-economics", "markov", "meta-analysis", "cost-effectiveness"],
+  "author": "HTA Artifact Standard Contributors",
+  "license": "MIT",
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "@types/jest": "^29.5.12",
+    "eslint": "^8.57.0",
+    "fast-check": "^3.15.0"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "roots": ["<rootDir>/tests"],
+    "collectCoverageFrom": ["src/**/*.js"],
+    "coverageThreshold": {
+      "global": {
+        "branches": 0,
+        "functions": 0,
+        "lines": 0,
+        "statements": 0
+      },
+      "./src/engine/markov.js": {
+        "branches": 55,
+        "functions": 85,
+        "lines": 70,
+        "statements": 70
+      },
+      "./src/parser/expression.js": {
+        "branches": 50,
+        "functions": 60,
+        "lines": 70,
+        "statements": 70
+      },
+      "./src/utils/sanitize.js": {
+        "branches": 30,
+        "functions": 45,
+        "lines": 50,
+        "statements": 50
+      },
+      "./src/utils/kahan.js": {
+        "functions": 80,
+        "lines": 70,
+        "statements": 70
+      },
+      "./src/utils/pcg32.js": {
+        "functions": 60,
+        "lines": 50,
+        "statements": 50
+      },
+      "./src/engine/budgetImpact.js": {
+        "functions": 50,
+        "lines": 40,
+        "statements": 40
+      },
+      "./src/engine/mcda.js": {
+        "functions": 50,
+        "lines": 40,
+        "statements": 40
+      }
+    },
+    "moduleNameMapper": {
+      "^@/(.*)$": "<rootDir>/src/$1"
+    }
+  }
+}

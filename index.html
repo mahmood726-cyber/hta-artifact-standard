@@ -4437,6 +4437,18 @@
     <script src="src/engine/automatedReportGen.js"></script>
     <script src="src/engine/collaboration.js"></script>
     <script src="src/ui/interactiveNetworkViz.js"></script>
+
+    <!-- New Engines (v0.8) -->
+    <script src="src/engine/budgetImpact.js"></script>
+    <script src="src/engine/mcda.js"></script>
+    <script src="src/engine/competingRisks.js"></script>
+    <script src="src/engine/cureModels.js"></script>
+    <script src="src/engine/semiMarkov.js"></script>
+    <script src="src/engine/correlatedPSA.js"></script>
+    <script src="src/engine/thresholdAnalysis.js"></script>
+    <script src="src/engine/scenarioAnalysis.js"></script>
+    <script src="src/engine/modelAveraging.js"></script>
+    <script src="src/engine/evsi.js"></script>
     <script>
         // Helper functions for calibration UI
         function addCalibrationParam() {
@@ -4820,28 +4832,28 @@
 
                 // Meta-analysis tests
                 this.test('DerSimonian-Laird τ² calculation', () => {
-                    if (typeof MetaAnalysis === 'undefined') return { skip: true };
+                    if (typeof MetaAnalysisMethods === 'undefined') return { skip: true };
                     const effects = [0.5, 0.3, 0.7, 0.4, 0.6];
                     const variances = [0.04, 0.09, 0.06, 0.08, 0.05];
-                    const ma = new MetaAnalysis();
+                    const ma = new MetaAnalysisMethods();
                     const result = ma.analyze(effects, variances, { method: 'DL' });
                     return result && typeof result.tau2 === 'number' && result.tau2 >= 0;
                 });
 
                 this.test('I² calculation range [0, 100]', () => {
-                    if (typeof MetaAnalysis === 'undefined') return { skip: true };
+                    if (typeof MetaAnalysisMethods === 'undefined') return { skip: true };
                     const effects = [0.5, 0.3, 0.7, 0.4, 0.6, 0.55, 0.45];
                     const variances = [0.04, 0.09, 0.06, 0.08, 0.05, 0.07, 0.06];
-                    const ma = new MetaAnalysis();
+                    const ma = new MetaAnalysisMethods();
                     const result = ma.analyze(effects, variances);
                     return result && result.I2 >= 0 && result.I2 <= 100;
                 });
 
                 this.test('Prediction interval uses t-distribution', () => {
-                    if (typeof MetaAnalysis === 'undefined') return { skip: true };
+                    if (typeof MetaAnalysisMethods === 'undefined') return { skip: true };
                     const effects = [0.5, 0.3, 0.7];
                     const variances = [0.04, 0.09, 0.06];
-                    const ma = new MetaAnalysis();
+                    const ma = new MetaAnalysisMethods();
                     const result = ma.analyze(effects, variances, { predictionInterval: true });
                     // With k=3 studies, PI should be wider than CI (uses t(1) vs z)
                     if (!result || !result.predictionInterval) return { skip: true };
@@ -5339,8 +5351,8 @@
 
                 // Test 10: Markov model with probability > 1
                 this.test('Markov validates probability bounds', () => {
-                    if (typeof MarkovCohortEngine === 'undefined') return { skip: true };
-                    const engine = new MarkovCohortEngine();
+                    if (typeof MarkovEngine === 'undefined') return { skip: true };
+                    const engine = new MarkovEngine();
                     try {
                         // This should fail validation
                         engine.validateTransition({ probability: 1.5 });

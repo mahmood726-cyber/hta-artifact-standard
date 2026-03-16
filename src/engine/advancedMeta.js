@@ -2933,6 +2933,14 @@ class PRISMAFlowDiagram {
 }
 
 // Export classes
+if (typeof window !== 'undefined') {
+    window.AdvancedMetaAnalysis = AdvancedMetaAnalysis;
+    window.ThreeLevelMetaAnalysis = AdvancedMetaAnalysis;  // Alias for HTML inline tests
+    window.LivingReviewEngine = LivingReviewEngine;
+    window.RiskOfBiasAssessment = RiskOfBiasAssessment;
+    window.PRISMAFlowDiagram = PRISMAFlowDiagram;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         AdvancedMetaAnalysis,
