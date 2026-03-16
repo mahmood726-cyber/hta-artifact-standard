@@ -96,6 +96,25 @@ class EVSIEngine {
             throw new Error('studyDesign.parameter is required');
         }
 
+        // Validate iterations have required NMB field
+        if (psaResults.iterations.length > 0) {
+            var sample = psaResults.iterations[0];
+            if (sample.nmb === undefined || sample.nmb === null) {
+                // Try to compute NMB from costs/qalys if wtp available
+                if (psaResults.wtp !== undefined && sample.qalys !== undefined && sample.costs !== undefined) {
+                    psaResults.iterations = psaResults.iterations.map(function(it) {
+                        return Object.assign({}, it, { nmb: it.qalys * psaResults.wtp - it.costs });
+                    });
+                } else if (psaResults.wtp !== undefined && sample.qaly !== undefined && sample.cost !== undefined) {
+                    psaResults.iterations = psaResults.iterations.map(function(it) {
+                        return Object.assign({}, it, { nmb: it.qaly * psaResults.wtp - it.cost });
+                    });
+                } else {
+                    throw new Error('PSA iterations must contain nmb field, or costs+qalys+wtp (or cost+qaly+wtp) for NMB computation');
+                }
+            }
+        }
+
         const n = studyDesign.sampleSize;
         const paramName = studyDesign.parameter;
         const dataModel = (studyDesign.dataModel || 'normal').toLowerCase();
@@ -130,7 +149,7 @@ class EVSIEngine {
         if (n === 0) {
             posteriorVar = priorVar; // No data → no learning
         } else {
-            posteriorVar = this._posteriorVariance(priorMean, priorVar, n, dataModel, paramValues);
+            posteriorVar = this._posteriorVariance(priorMean, priorVar, n, dataModel, paramValues, studyDesign);
         }
 
         // Ensure posterior <= prior (numerically)
@@ -379,7 +398,7 @@ class EVSIEngine {
      * Compute posterior variance based on data model.
      * @private
      */
-    _posteriorVariance(priorMean, priorVar, n, dataModel, paramValues) {
+    _posteriorVariance(priorMean, priorVar, n, dataModel, paramValues, studyDesign) {
         switch (dataModel) {
             case 'binomial': {
                 // Estimate beta prior parameters via method of moments
@@ -393,8 +412,9 @@ class EVSIEngine {
                 return this.normalPosteriorVar(priorVar, dataVar, n);
             }
             case 'survival': {
-                // Assume ~70% event rate for survival studies
-                const nEvents = Math.floor(n * 0.7);
+                // Use eventRate from studyDesign if provided, default 0.7
+                const eventRate = (studyDesign && studyDesign.eventRate != null) ? studyDesign.eventRate : 0.7;
+                const nEvents = Math.max(1, Math.floor(n * eventRate));
                 return this.survivalPosteriorVar(priorVar, nEvents);
             }
             default:
@@ -421,8 +441,10 @@ class EVSIEngine {
     }
 
     /**
-     * Compute EVPPI for a single parameter using non-parametric regression.
-     * Uses a simplified binned regression approach.
+     * Compute EVPPI using binned conditional mean approach.
+     * NOTE: This is a simplified estimator known to have upward bias for small
+     * bin counts (Strong et al. 2014). For production use, consider GAM-based
+     * methods (Strong & Oakley 2014) or INLA (Heath et al. 2016).
      * @private
      */
     _computeEVPPI(psaResults, paramName) {
@@ -437,7 +459,7 @@ class EVSIEngine {
         const meanNMB = this._mean(nmbs);
 
         // Bin-based regression: sort by parameter, compute conditional E[NMB|param]
-        const nBins = Math.max(5, Math.min(20, Math.floor(Math.sqrt(n))));
+        const nBins = Math.max(20, Math.min(50, Math.floor(Math.sqrt(n))));
         const indexed = paramValues.map((v, i) => ({ v, nmb: nmbs[i] }));
         indexed.sort((a, b) => a.v - b.v);
 
@@ -481,6 +503,7 @@ class EVSIEngine {
      * @private
      */
     _variance(arr, mean) {
+        if (!arr || arr.length < 2) return 0;
         if (mean === undefined) mean = this._mean(arr);
         if (KahanSumRef) {
             const ks = new KahanSumRef();

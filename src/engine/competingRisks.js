@@ -182,14 +182,24 @@ class CompetingRisksEngine {
         let survPrev = 1.0; // S(t-) — overall KM survival just before current time
         let atRisk = n;
 
-        // For variance computation (Marubini-Valsecchi / Aalen approach)
-        // Var(CIF_k(t)) ≈ sum of incremental variance terms
+        // Aalen CIF variance with cross-terms (delta-method form)
+        // Var(CIF_k(t)) = sum_{s<=t} [ S(s-)^2 * d_k(n-d_k) / (n^2*(n-1))
+        //                  + CIF_k_remainder(s)^2 * d*(n-d) / (n^2*(n-1))
+        //                  - 2 * S(s-) * CIF_k_remainder(s) * d_k * d / (n^2*(n-1)) ]
+        // where d = total failures, d_k = cause-k failures, n = at risk,
+        // CIF_k_remainder(s) = CIF_k(t) - CIF_k(s) (future CIF accumulated after s)
+        //
+        // Since CIF_k_remainder depends on the final CIF, we use a two-pass approach:
+        // Pass 1: compute CIF values at each time point
+        // Pass 2: compute variances using the full CIF trajectory
+
         const cifAccum = {};
-        const varTerms = {}; // accumulated variance for each cause
         for (const c of causes) {
             cifAccum[c] = 0;
-            varTerms[c] = 0;
         }
+
+        // Pass 1: collect CIF trajectory and time-point data
+        const trajectory = []; // [{time, atRisk, totalFailures, dk:{}, survPrev, cifSnap:{}, survCurrent}]
 
         for (const ts of timeSummary) {
             const t = ts.time;
@@ -203,10 +213,11 @@ class CompetingRisksEngine {
             const totalFailures = totalEvents - ts.censored;
 
             // CIF increment for each cause
+            const dk = {};
             for (const c of causes) {
-                const dk = ts[c];
-                if (dk > 0) {
-                    const increment = survPrev * (dk / atRisk);
+                dk[c] = ts[c];
+                if (dk[c] > 0) {
+                    const increment = survPrev * (dk[c] / atRisk);
                     cifAccum[c] += increment;
                 }
             }
@@ -214,28 +225,79 @@ class CompetingRisksEngine {
             // Update overall survival: S(t) = S(t-) * (1 - d/n) where d = total failures
             const survCurrent = survPrev * (1 - totalFailures / atRisk);
 
-            // Variance approximation (Aalen 1978, simplified Greenwood-like)
-            // For CIF variance: delta method on the product-limit estimator
+            // Snapshot CIF values at this time
+            const cifSnap = {};
             for (const c of causes) {
-                const dk = ts[c];
-                if (atRisk > 1) {
-                    // Contribution to variance at this time point
-                    const hk = dk / atRisk;
-                    const hAll = totalFailures / atRisk;
-                    // Variance increment (simplified Aalen estimator)
-                    const varIncrement = (survPrev * survPrev) * hk * (1 - hk) / atRisk;
-                    varTerms[c] += varIncrement;
-                }
+                cifSnap[c] = cifAccum[c];
             }
 
-            // Record CIF values for each cause
+            trajectory.push({
+                time: t,
+                atRisk: atRisk,
+                totalFailures: totalFailures,
+                dk: dk,
+                survPrev: survPrev,
+                cifSnap: cifSnap,
+                survCurrent: survCurrent,
+                censored: ts.censored
+            });
+
+            // Update at-risk: remove all events and censored at this time
+            atRisk -= (totalFailures + ts.censored);
+            survPrev = Math.max(0, survCurrent);
+        }
+
+        // Final CIF values for each cause
+        const cifFinal = {};
+        for (const c of causes) {
+            cifFinal[c] = trajectory.length > 0
+                ? trajectory[trajectory.length - 1].cifSnap[c]
+                : 0;
+        }
+
+        // Pass 2: compute variance at each time point using Aalen formula with cross-terms
+        for (let tIdx = 0; tIdx < trajectory.length; tIdx++) {
+            const currentCif = {};
             for (const c of causes) {
-                const se = Math.sqrt(Math.max(0, varTerms[c]));
-                const lower = Math.max(0, cifAccum[c] - zAlpha * se);
-                const upper = Math.min(1, cifAccum[c] + zAlpha * se);
+                currentCif[c] = trajectory[tIdx].cifSnap[c];
+            }
+
+            // Accumulate variance terms over all time points up to and including tIdx
+            for (const c of causes) {
+                let varSum = 0;
+                for (let sIdx = 0; sIdx <= tIdx; sIdx++) {
+                    const step = trajectory[sIdx];
+                    const nRisk = step.atRisk;
+                    const d = step.totalFailures;
+                    const dkVal = step.dk[c];
+
+                    if (nRisk <= 1) continue;
+
+                    const Sm = step.survPrev; // S(s-)
+                    // CIF_k accumulated after time s up to current time tIdx
+                    const cifAtS = sIdx > 0 ? trajectory[sIdx - 1].cifSnap[c] : 0;
+                    const cifRemainder = currentCif[c] - trajectory[sIdx].cifSnap[c];
+
+                    const denom = nRisk * nRisk * (nRisk - 1);
+
+                    // Term 1: S(s-)^2 * d_k * (n - d_k) / (n^2 * (n-1))
+                    const term1 = Sm * Sm * dkVal * (nRisk - dkVal) / denom;
+
+                    // Term 2: CIF_k_remainder^2 * d * (n - d) / (n^2 * (n-1))
+                    const term2 = cifRemainder * cifRemainder * d * (nRisk - d) / denom;
+
+                    // Term 3: -2 * S(s-) * CIF_k_remainder * d_k * d / (n^2 * (n-1))
+                    const term3 = -2 * Sm * cifRemainder * dkVal * d / denom;
+
+                    varSum += term1 + term2 + term3;
+                }
+
+                const se = Math.sqrt(Math.max(0, varSum));
+                const lower = Math.max(0, currentCif[c] - zAlpha * se);
+                const upper = Math.min(1, currentCif[c] + zAlpha * se);
                 result[c].push({
-                    time: t,
-                    cif: cifAccum[c],
+                    time: trajectory[tIdx].time,
+                    cif: currentCif[c],
                     se: se,
                     lower: lower,
                     upper: upper
@@ -243,13 +305,9 @@ class CompetingRisksEngine {
             }
 
             result.overallSurvival.push({
-                time: t,
-                surv: Math.max(0, survCurrent)
+                time: trajectory[tIdx].time,
+                surv: Math.max(0, trajectory[tIdx].survCurrent)
             });
-
-            // Update at-risk: remove all events and censored at this time
-            atRisk -= (totalFailures + ts.censored);
-            survPrev = Math.max(0, survCurrent);
         }
 
         return result;
@@ -370,10 +428,95 @@ class CompetingRisksEngine {
         if (K === 2) {
             statistic = V[0] > 0 ? (U[0] * U[0]) / V[0] : 0;
         } else {
-            // General case: invert the (K-1)×(K-1) submatrix
-            // For simplicity, use the first group's statistic as approximate
-            const Vsub = V[0];
-            statistic = Vsub > 0 ? (U[0] * U[0]) / Vsub : 0;
+            // General case: extract (K-1)×(K-1) leading submatrix of V,
+            // invert via Gauss-Jordan, compute U_sub' * V_inv * U_sub
+            const m = K - 1;
+
+            // Extract leading (K-1)×(K-1) submatrix and U_sub
+            const Vsub = new Array(m * m);
+            const Usub = new Array(m);
+            for (let i = 0; i < m; i++) {
+                Usub[i] = U[i];
+                for (let j = 0; j < m; j++) {
+                    Vsub[i * m + j] = V[i * K + j];
+                }
+            }
+
+            // Gauss-Jordan elimination on augmented matrix [Vsub | I]
+            const aug = new Array(m * 2 * m).fill(0);
+            for (let i = 0; i < m; i++) {
+                for (let j = 0; j < m; j++) {
+                    aug[i * (2 * m) + j] = Vsub[i * m + j];
+                }
+                aug[i * (2 * m) + m + i] = 1; // identity on right side
+            }
+
+            let invertible = true;
+            for (let col = 0; col < m; col++) {
+                // Partial pivoting: find row with largest absolute value in column
+                let maxVal = Math.abs(aug[col * (2 * m) + col]);
+                let maxRow = col;
+                for (let row = col + 1; row < m; row++) {
+                    const val = Math.abs(aug[row * (2 * m) + col]);
+                    if (val > maxVal) {
+                        maxVal = val;
+                        maxRow = row;
+                    }
+                }
+
+                if (maxVal < 1e-15) {
+                    invertible = false;
+                    break;
+                }
+
+                // Swap rows if needed
+                if (maxRow !== col) {
+                    for (let j = 0; j < 2 * m; j++) {
+                        const tmp = aug[col * (2 * m) + j];
+                        aug[col * (2 * m) + j] = aug[maxRow * (2 * m) + j];
+                        aug[maxRow * (2 * m) + j] = tmp;
+                    }
+                }
+
+                // Scale pivot row
+                const pivot = aug[col * (2 * m) + col];
+                for (let j = 0; j < 2 * m; j++) {
+                    aug[col * (2 * m) + j] /= pivot;
+                }
+
+                // Eliminate column in all other rows
+                for (let row = 0; row < m; row++) {
+                    if (row === col) continue;
+                    const factor = aug[row * (2 * m) + col];
+                    for (let j = 0; j < 2 * m; j++) {
+                        aug[row * (2 * m) + j] -= factor * aug[col * (2 * m) + j];
+                    }
+                }
+            }
+
+            if (!invertible) {
+                // Fallback: singular matrix, use first element
+                statistic = V[0] > 0 ? (U[0] * U[0]) / V[0] : 0;
+            } else {
+                // Extract inverse from right half of augmented matrix
+                const Vinv = new Array(m * m);
+                for (let i = 0; i < m; i++) {
+                    for (let j = 0; j < m; j++) {
+                        Vinv[i * m + j] = aug[i * (2 * m) + m + j];
+                    }
+                }
+
+                // Compute U_sub' * V_inv * U_sub
+                statistic = 0;
+                for (let i = 0; i < m; i++) {
+                    for (let j = 0; j < m; j++) {
+                        statistic += Usub[i] * Vinv[i * m + j] * Usub[j];
+                    }
+                }
+
+                // Ensure non-negative (numerical noise)
+                if (statistic < 0) statistic = 0;
+            }
         }
 
         // p-value from chi-squared distribution
@@ -424,12 +567,77 @@ class CompetingRisksEngine {
         const maxIter = 50;
         const tol = 1e-8;
 
-        // Event times for the target cause
-        const eventTimes = sorted
-            .filter(d => d.event === cause)
-            .map(d => d.time);
+        // Unique event times for the target cause (sorted)
+        const uniqueEventTimes = [...new Set(
+            sorted.filter(d => d.event === cause).map(d => d.time)
+        )].sort((a, b) => a - b);
 
-        if (eventTimes.length < 2) {
+        if (uniqueEventTimes.length < 1) {
+            throw new Error(`Need at least 2 events for cause "${cause}"`);
+        }
+
+        // Pre-compute risk sets once before NR loop (P1-12 performance fix).
+        // For each unique event time, store the indices into `sorted` of
+        // subjects in the subdistribution risk set, plus the event subjects.
+        //
+        // Subdistribution risk set at time t:
+        //   - cause events with time >= t
+        //   - censored with time >= t
+        //   - competing events: always in risk set (remain regardless of time)
+        //
+        // We partition subjects into three groups:
+        //   1. Competing-event subjects (always at risk) — constant set
+        //   2. Cause subjects sorted by time — at risk while time >= t
+        //   3. Censored subjects sorted by time — at risk while time >= t
+        //
+        // For groups 2 and 3 we use a pointer that advances as t increases.
+
+        const competingSubjects = []; // always in risk set
+        const causeSubjects = [];     // sorted by time, at risk while time >= t
+        const censoredSubjects = [];  // sorted by time, at risk while time >= t
+
+        for (const d of sorted) {
+            if (d.event === cause) {
+                causeSubjects.push(d);
+            } else if (d.event === 'censored') {
+                censoredSubjects.push(d);
+            } else {
+                competingSubjects.push(d); // competing event: always in risk set
+            }
+        }
+        // causeSubjects and censoredSubjects are already sorted since sorted is sorted
+
+        // Pre-compute: for each unique event time, the start indices and event covariates
+        const precomputed = [];
+        let causePtr = 0;
+        let censoredPtr = 0;
+
+        for (const t of uniqueEventTimes) {
+            // Advance cause pointer: skip subjects with time < t
+            while (causePtr < causeSubjects.length && causeSubjects[causePtr].time < t) {
+                causePtr++;
+            }
+            // Advance censored pointer: skip subjects with time < t
+            while (censoredPtr < censoredSubjects.length && censoredSubjects[censoredPtr].time < t) {
+                censoredPtr++;
+            }
+
+            // Collect event covariates at this time (all tied events — P0-2 fix)
+            const eventCovariates = [];
+            for (let i = causePtr; i < causeSubjects.length && causeSubjects[i].time === t; i++) {
+                eventCovariates.push(causeSubjects[i].covariate);
+            }
+
+            precomputed.push({
+                time: t,
+                causeStartIdx: causePtr,
+                censoredStartIdx: censoredPtr,
+                eventCovariates: eventCovariates
+            });
+        }
+
+        const totalCauseEvents = sorted.filter(d => d.event === cause).length;
+        if (totalCauseEvents < 2) {
             throw new Error(`Need at least 2 events for cause "${cause}"`);
         }
 
@@ -437,20 +645,32 @@ class CompetingRisksEngine {
             let score = 0;
             let info = 0;
 
-            for (const t of eventTimes) {
-                // Subjects at risk at time t in subdistribution sense
-                const riskSet = sorted.filter(d => {
-                    if (d.event === cause) return d.time >= t;
-                    if (d.event === 'censored') return d.time >= t;
-                    // Competing events: remain in risk set
-                    return true;
-                });
+            for (const pc of precomputed) {
+                if (pc.eventCovariates.length === 0) continue;
 
-                if (riskSet.length === 0) continue;
-
-                // Weighted sums
+                // Compute weighted sums S0, S1, S2 over the risk set
                 let S0 = 0, S1 = 0, S2 = 0;
-                for (const r of riskSet) {
+
+                // 1. Competing-event subjects (always at risk)
+                for (const r of competingSubjects) {
+                    const w = Math.exp(beta * r.covariate);
+                    S0 += w;
+                    S1 += w * r.covariate;
+                    S2 += w * r.covariate * r.covariate;
+                }
+
+                // 2. Cause subjects with time >= t
+                for (let i = pc.causeStartIdx; i < causeSubjects.length; i++) {
+                    const r = causeSubjects[i];
+                    const w = Math.exp(beta * r.covariate);
+                    S0 += w;
+                    S1 += w * r.covariate;
+                    S2 += w * r.covariate * r.covariate;
+                }
+
+                // 3. Censored subjects with time >= t
+                for (let i = pc.censoredStartIdx; i < censoredSubjects.length; i++) {
+                    const r = censoredSubjects[i];
                     const w = Math.exp(beta * r.covariate);
                     S0 += w;
                     S1 += w * r.covariate;
@@ -459,13 +679,12 @@ class CompetingRisksEngine {
 
                 if (S0 === 0) continue;
 
-                // Event at this time
-                const eventSubject = sorted.find(d => d.time === t && d.event === cause);
-                if (!eventSubject) continue;
-
                 const xbar = S1 / S0;
-                score += eventSubject.covariate - xbar;
-                info += (S2 / S0) - (xbar * xbar);
+                // Accumulate score for all tied events at this time
+                for (const cov of pc.eventCovariates) {
+                    score += cov - xbar;
+                }
+                info += pc.eventCovariates.length * ((S2 / S0) - (xbar * xbar));
             }
 
             if (Math.abs(info) < 1e-15) break;
@@ -478,17 +697,28 @@ class CompetingRisksEngine {
 
         const hr = Math.exp(beta);
 
-        // Estimate SE from information matrix (last iteration)
+        // Estimate SE from information matrix at final beta
         let infoFinal = 0;
-        for (const t of eventTimes) {
-            const riskSet = sorted.filter(d => {
-                if (d.event === cause) return d.time >= t;
-                if (d.event === 'censored') return d.time >= t;
-                return true;
-            });
+        for (const pc of precomputed) {
+            if (pc.eventCovariates.length === 0) continue;
 
             let S0 = 0, S1 = 0, S2 = 0;
-            for (const r of riskSet) {
+
+            for (const r of competingSubjects) {
+                const w = Math.exp(beta * r.covariate);
+                S0 += w;
+                S1 += w * r.covariate;
+                S2 += w * r.covariate * r.covariate;
+            }
+            for (let i = pc.causeStartIdx; i < causeSubjects.length; i++) {
+                const r = causeSubjects[i];
+                const w = Math.exp(beta * r.covariate);
+                S0 += w;
+                S1 += w * r.covariate;
+                S2 += w * r.covariate * r.covariate;
+            }
+            for (let i = pc.censoredStartIdx; i < censoredSubjects.length; i++) {
+                const r = censoredSubjects[i];
                 const w = Math.exp(beta * r.covariate);
                 S0 += w;
                 S1 += w * r.covariate;
@@ -497,7 +727,7 @@ class CompetingRisksEngine {
 
             if (S0 > 0) {
                 const xbar = S1 / S0;
-                infoFinal += (S2 / S0) - (xbar * xbar);
+                infoFinal += pc.eventCovariates.length * ((S2 / S0) - (xbar * xbar));
             }
         }
 

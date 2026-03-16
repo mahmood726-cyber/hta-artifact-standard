@@ -42,10 +42,10 @@ const DEFAULT_CURRENCY = 'USD';
  * Recognizes: drugCost, adminCost, monitoringCost, aeCost.
  */
 function sumTreatmentCosts(tx) {
-    return (tx.drugCost || 0)
-         + (tx.adminCost || 0)
-         + (tx.monitoringCost || 0)
-         + (tx.aeCost || 0);
+    return (tx.drugCost ?? 0)
+         + (tx.adminCost ?? 0)
+         + (tx.monitoringCost ?? 0)
+         + (tx.aeCost ?? 0);
 }
 
 /**
@@ -226,13 +226,21 @@ class BudgetImpactEngine {
             const newTxCost = patients * newTxPerPatient;
             const currentTxCost = patients * currentTxPerPatient;
             const offsetSavings = patients * offsetPerPatient;
-            const incremental = newTxCost - currentTxCost + offsetSavings;
+
+            // P0-7: Transparency — report both "worlds" for ISPOR BIA
+            const worldWithoutCost = eligiblePopulation * currentTxPerPatient;
+            const worldWithCost = patients * newTxPerPatient
+                                + (eligiblePopulation - patients) * currentTxPerPatient;
+            const incremental = worldWithCost - worldWithoutCost + offsetSavings;
+
             const discountFactor = 1 / Math.pow(1 + discountRate, y);
             const discountedIncremental = incremental * discountFactor;
 
             yearlyBudget.push({
                 year,
                 patients,
+                worldWithoutCost,
+                worldWithCost,
                 newTxCost,
                 currentTxCost,
                 offsetSavings,
@@ -252,7 +260,7 @@ class BudgetImpactEngine {
         }
 
         const perPatientIncremental = cumulativePatients > 0
-            ? totalDiscounted / cumulativePatients
+            ? totalIncremental / cumulativePatients
             : 0;
 
         return {
@@ -261,7 +269,10 @@ class BudgetImpactEngine {
             yearlyBudget,
             totalIncremental,
             totalDiscounted,
-            netBudgetImpact: totalDiscounted,
+            // P0-6: ISPOR BIA reference case — primary result is UNDISCOUNTED
+            // (Sullivan et al. 2014; Mauskopf et al. 2017)
+            netBudgetImpact: totalIncremental,
+            netBudgetImpactDiscounted: totalDiscounted,
             perPatientIncremental,
             summary: {
                 peakYear,

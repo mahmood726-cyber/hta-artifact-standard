@@ -93,8 +93,13 @@ class ModelAveragingEngine {
 
     /**
      * Model-averaged predictions: weighted combination of model outputs.
+     * Uses Hoeting et al. (1999) total variance:
+     *   Var_total = sum_k w_k * (sigma_k^2 + (mu_k - mu_bar)^2)
+     * where sigma_k^2 is within-model variance and mu_k is the model prediction.
      *
-     * @param {Object[]} models - [{name, predictions: [y1, y2, ...], weight}, ...]
+     * @param {Object[]} models - [{name, predictions: [y1, y2, ...], weight, variance?: [v1, v2, ...]}]
+     *   If variance is provided, it is used as within-model variance per time point.
+     *   If omitted, falls back to between-model variance only (backwards compatible).
      * @returns {Object} {averaged, uncertainty, credibleInterval}
      */
     modelAverage(models) {
@@ -104,7 +109,7 @@ class ModelAveragingEngine {
 
         const nPred = models[0].predictions.length;
         const averaged = new Array(nPred).fill(0);
-        const uncertainty = new Array(nPred).fill(0);
+        const totalVariance = new Array(nPred).fill(0);
 
         // Weighted mean
         let totalWeight = 0;
@@ -119,18 +124,21 @@ class ModelAveragingEngine {
             }
         }
 
-        // Between-model variance (weighted)
+        // Total variance = within-model + between-model (Hoeting et al. 1999)
         for (const m of models) {
             const w = totalWeight > 0 ? m.weight / totalWeight : 1 / models.length;
             for (let j = 0; j < nPred; j++) {
                 const diff = m.predictions[j] - averaged[j];
-                uncertainty[j] += w * diff * diff;
+                const betweenVar = diff * diff;
+                const withinVar = (m.variance && m.variance[j] != null) ? m.variance[j] : 0;
+                totalVariance[j] += w * (withinVar + betweenVar);
             }
         }
 
         // Convert variance to SD
+        const uncertainty = new Array(nPred);
         for (let j = 0; j < nPred; j++) {
-            uncertainty[j] = Math.sqrt(uncertainty[j]);
+            uncertainty[j] = Math.sqrt(totalVariance[j]);
         }
 
         // 95% credible interval using normal approximation
@@ -154,6 +162,18 @@ class ModelAveragingEngine {
      * @returns {Object[]} [{name, params, logLik, aic, bic, weight}, ...]
      */
     fitCompare(data, distributions) {
+        if (!data || !Array.isArray(data) || data.length === 0) {
+            throw new Error('Data must be a non-empty array');
+        }
+        for (var d of data) {
+            if (typeof d.time !== 'number' || d.time < 0) {
+                throw new Error('All times must be non-negative numbers');
+            }
+            if (d.event !== 0 && d.event !== 1) {
+                throw new Error('Event must be 0 or 1');
+            }
+        }
+
         const results = [];
         const n = data.length;
 
@@ -222,6 +242,11 @@ class ModelAveragingEngine {
     _fitExponential(data) {
         const totalEvents = data.reduce((s, d) => s + d.event, 0);
         const totalTime = data.reduce((s, d) => s + d.time, 0);
+
+        if (totalTime <= 0) {
+            return { params: { lambda: NaN }, logLik: -Infinity, aic: Infinity, bic: Infinity, converged: false };
+        }
+
         const lambda = totalEvents / totalTime;
 
         // Log-likelihood: sum[ event*log(lambda) - lambda*t ]
@@ -275,17 +300,33 @@ class ModelAveragingEngine {
                 d2ll_dshapescale += -e / scale + zk * (1 + shape * logZ) / scale;
             }
 
-            // Chain rule for log-parameterization
-            const g1 = dll_dshape * shape;
-            const g2 = dll_dscale * scale;
+            // Chain rule for log-parameterization: gradients
+            const gShape = dll_dshape * shape;
+            const gScale = dll_dscale * scale;
 
-            const norm = Math.abs(g1) + Math.abs(g2);
+            const norm = Math.abs(gShape) + Math.abs(gScale);
             if (norm < NR_TOLERANCE) break;
 
-            // Simple gradient step (avoid full Hessian inversion complexity)
-            const stepSize = 0.01;
-            logShape += stepSize * g1 / (Math.abs(g1) + 1);
-            logScale += stepSize * g2 / (Math.abs(g2) + 1);
+            // Hessian in log-parameterization (approximate using original Hessian + chain rule)
+            const H11 = d2ll_dshape2 * shape * shape + dll_dshape * shape;
+            const H22 = d2ll_dscale2 * scale * scale + dll_dscale * scale;
+            const H12 = d2ll_dshapescale * shape * scale;
+
+            // Newton-Raphson: step = -H_inv * g
+            const det = H11 * H22 - H12 * H12;
+            if (Math.abs(det) > 1e-20) {
+                var dLogShape = -(H22 * gShape - H12 * gScale) / det;
+                var dLogScale = -(-H12 * gShape + H11 * gScale) / det;
+                // Dampen if step too large
+                var maxStep = Math.max(Math.abs(dLogShape), Math.abs(dLogScale));
+                if (maxStep > 2) { var damping = 2 / maxStep; dLogShape *= damping; dLogScale *= damping; }
+                logShape += dLogShape;
+                logScale += dLogScale;
+            } else {
+                // Fallback to gradient ascent
+                logShape += 0.01 * gShape / (Math.abs(gShape) + 1);
+                logScale += 0.01 * gScale / (Math.abs(gScale) + 1);
+            }
 
             // Clamp for numerical stability
             logShape = Math.max(-5, Math.min(5, logShape));
@@ -415,12 +456,69 @@ class ModelAveragingEngine {
                 }
             }
 
-            const norm = Math.abs(g_alpha * alpha) + Math.abs(g_beta * beta);
+            // Gradients in log-parameterization
+            const gAlpha = g_alpha * alpha;
+            const gBeta = g_beta * beta;
+
+            const norm = Math.abs(gAlpha) + Math.abs(gBeta);
             if (norm < NR_TOLERANCE) break;
 
-            const step = 0.01;
-            logAlpha += step * g_alpha * alpha / (Math.abs(g_alpha * alpha) + 1);
-            logBeta += step * g_beta * beta / (Math.abs(g_beta * beta) + 1);
+            // Compute Hessian elements via numerical approximation
+            // Use finite differences on the log-parameter gradients
+            const eps = 1e-5;
+            // Perturb logAlpha
+            var alphaP = Math.exp(logAlpha + eps), betaP = beta;
+            var g_alpha_p = 0, g_beta_p = 0;
+            for (const d2 of data) {
+                if (d2.time <= 0) continue;
+                const z2 = Math.pow(d2.time / alphaP, betaP);
+                if (d2.event === 1) {
+                    g_alpha_p += -betaP / alphaP + 2 * betaP * z2 / (alphaP * (1 + z2));
+                    g_beta_p += 1 / betaP + Math.log(d2.time / alphaP) - 2 * z2 * Math.log(d2.time / alphaP) / (1 + z2);
+                } else {
+                    g_alpha_p += betaP * z2 / (alphaP * (1 + z2));
+                    g_beta_p += -z2 * Math.log(d2.time / alphaP) / (1 + z2);
+                }
+            }
+            var gAlphaP = g_alpha_p * alphaP;
+            var gBetaP = g_beta_p * betaP;
+            var H11 = (gAlphaP - gAlpha) / eps;
+            var H12_a = (gBetaP - gBeta) / eps;
+
+            // Perturb logBeta
+            alphaP = alpha; betaP = Math.exp(logBeta + eps);
+            g_alpha_p = 0; g_beta_p = 0;
+            for (const d2 of data) {
+                if (d2.time <= 0) continue;
+                const z2 = Math.pow(d2.time / alphaP, betaP);
+                if (d2.event === 1) {
+                    g_alpha_p += -betaP / alphaP + 2 * betaP * z2 / (alphaP * (1 + z2));
+                    g_beta_p += 1 / betaP + Math.log(d2.time / alphaP) - 2 * z2 * Math.log(d2.time / alphaP) / (1 + z2);
+                } else {
+                    g_alpha_p += betaP * z2 / (alphaP * (1 + z2));
+                    g_beta_p += -z2 * Math.log(d2.time / alphaP) / (1 + z2);
+                }
+            }
+            gAlphaP = g_alpha_p * alphaP;
+            gBetaP = g_beta_p * betaP;
+            var H12_b = (gAlphaP - gAlpha) / eps;
+            var H22 = (gBetaP - gBeta) / eps;
+            var H12 = 0.5 * (H12_a + H12_b);
+
+            // Newton-Raphson step
+            var det = H11 * H22 - H12 * H12;
+            if (Math.abs(det) > 1e-20) {
+                var dLogAlpha = -(H22 * gAlpha - H12 * gBeta) / det;
+                var dLogBeta = -(-H12 * gAlpha + H11 * gBeta) / det;
+                var maxStep = Math.max(Math.abs(dLogAlpha), Math.abs(dLogBeta));
+                if (maxStep > 2) { var damping = 2 / maxStep; dLogAlpha *= damping; dLogBeta *= damping; }
+                logAlpha += dLogAlpha;
+                logBeta += dLogBeta;
+            } else {
+                // Fallback to gradient ascent
+                logAlpha += 0.01 * gAlpha / (Math.abs(gAlpha) + 1);
+                logBeta += 0.01 * gBeta / (Math.abs(gBeta) + 1);
+            }
 
             logAlpha = Math.max(-10, Math.min(20, logAlpha));
             logBeta = Math.max(-5, Math.min(5, logBeta));
@@ -488,12 +586,73 @@ class ModelAveragingEngine {
                 }
             }
 
-            const norm = Math.abs(g_shape * shape) + Math.abs(g_rate * rate);
+            // Gradients in log-parameterization
+            const gShape = g_shape * shape;
+            const gRate = g_rate * rate;
+
+            const norm = Math.abs(gShape) + Math.abs(gRate);
             if (norm < NR_TOLERANCE) break;
 
-            const step = 0.005;
-            logShape += step * g_shape * shape / (Math.abs(g_shape * shape) + 1);
-            logRate += step * g_rate * rate / (Math.abs(g_rate * rate) + 1);
+            // Numerical Hessian via finite differences on log-parameter gradients
+            const eps = 1e-5;
+
+            // Perturb logShape
+            var shapeP = Math.exp(logShape + eps), rateP = rate;
+            var gs_p = 0, gr_p = 0;
+            for (const d2 of data) {
+                if (d2.time <= 0) continue;
+                if (d2.event === 1) {
+                    gs_p += Math.log(rateP) + Math.log(d2.time) - this._digamma(shapeP);
+                    gr_p += shapeP / rateP - d2.time;
+                } else {
+                    const gv = this._upperIncompleteGammaRatio(shapeP, rateP * d2.time);
+                    if (gv > 1e-15) {
+                        gr_p += -d2.time * Math.exp(-rateP * d2.time) * Math.pow(rateP * d2.time, shapeP - 1)
+                                / (this._gammaFn(shapeP) * gv);
+                    }
+                }
+            }
+            var gShapeP = gs_p * shapeP;
+            var gRateP = gr_p * rateP;
+            var H11 = (gShapeP - gShape) / eps;
+            var H12_a = (gRateP - gRate) / eps;
+
+            // Perturb logRate
+            shapeP = shape; rateP = Math.exp(logRate + eps);
+            gs_p = 0; gr_p = 0;
+            for (const d2 of data) {
+                if (d2.time <= 0) continue;
+                if (d2.event === 1) {
+                    gs_p += Math.log(rateP) + Math.log(d2.time) - this._digamma(shapeP);
+                    gr_p += shapeP / rateP - d2.time;
+                } else {
+                    const gv = this._upperIncompleteGammaRatio(shapeP, rateP * d2.time);
+                    if (gv > 1e-15) {
+                        gr_p += -d2.time * Math.exp(-rateP * d2.time) * Math.pow(rateP * d2.time, shapeP - 1)
+                                / (this._gammaFn(shapeP) * gv);
+                    }
+                }
+            }
+            gShapeP = gs_p * shapeP;
+            gRateP = gr_p * rateP;
+            var H12_b = (gShapeP - gShape) / eps;
+            var H22 = (gRateP - gRate) / eps;
+            var H12 = 0.5 * (H12_a + H12_b);
+
+            // Newton-Raphson step
+            var det = H11 * H22 - H12 * H12;
+            if (Math.abs(det) > 1e-20) {
+                var dLogShape = -(H22 * gShape - H12 * gRate) / det;
+                var dLogRate = -(-H12 * gShape + H11 * gRate) / det;
+                var maxStep = Math.max(Math.abs(dLogShape), Math.abs(dLogRate));
+                if (maxStep > 2) { var damping = 2 / maxStep; dLogShape *= damping; dLogRate *= damping; }
+                logShape += dLogShape;
+                logRate += dLogRate;
+            } else {
+                // Fallback to gradient ascent
+                logShape += 0.005 * gShape / (Math.abs(gShape) + 1);
+                logRate += 0.005 * gRate / (Math.abs(gRate) + 1);
+            }
 
             logShape = Math.max(-5, Math.min(10, logShape));
             logRate = Math.max(-10, Math.min(10, logRate));
@@ -520,7 +679,11 @@ class ModelAveragingEngine {
 
     /**
      * Gompertz distribution MLE. h(t) = b * exp(eta * t)
-     * S(t) = exp(-(b/eta)*(exp(eta*t) - 1))
+     * S(t) = exp(-cumHaz(t))
+     * cumHaz(t):
+     *   |eta| >= 1e-10: (b/eta)*(exp(eta*t) - 1)
+     *   |eta| < 1e-10:  b*t + 0.5*b*eta*t^2  (Taylor expansion)
+     * eta < 0 is clinically valid (decreasing hazard in HTA).
      */
     _fitGompertz(data) {
         const events = data.filter(d => d.event === 1 && d.time > 0);
@@ -536,35 +699,100 @@ class ModelAveragingEngine {
 
             for (const d of data) {
                 if (d.time <= 0) continue;
-                const expEtaT = Math.exp(eta * d.time);
-                const cumHaz = (b / eta) * (expEtaT - 1);
+                var etat = Math.min(Math.max(eta * d.time, -500), 500);
+                var expEtaT = Math.exp(etat);
 
-                if (d.event === 1) {
-                    g_b += 1 / b - (expEtaT - 1) / eta;
-                    g_eta += d.time - b * (d.time * expEtaT * eta - expEtaT + 1) / (eta * eta);
+                if (Math.abs(eta) < 1e-10) {
+                    // Taylor expansion gradients
+                    var t = d.time;
+                    if (d.event === 1) {
+                        g_b += 1 / b - t;
+                        g_eta += t - b * t * t * 0.5;
+                    } else {
+                        g_b += -t;
+                        g_eta += -b * t * t * 0.5;
+                    }
                 } else {
-                    g_b += -(expEtaT - 1) / eta;
-                    g_eta += -b * (d.time * expEtaT * eta - expEtaT + 1) / (eta * eta);
+                    if (d.event === 1) {
+                        g_b += 1 / b - (expEtaT - 1) / eta;
+                        g_eta += d.time - b * (d.time * expEtaT * eta - expEtaT + 1) / (eta * eta);
+                    } else {
+                        g_b += -(expEtaT - 1) / eta;
+                        g_eta += -b * (d.time * expEtaT * eta - expEtaT + 1) / (eta * eta);
+                    }
                 }
             }
 
             const norm = Math.abs(g_b) + Math.abs(g_eta);
             if (norm < NR_TOLERANCE) break;
 
-            const step = 0.0005;
-            b += step * g_b;
-            eta += step * g_eta;
+            // Numerical Hessian via finite differences
+            const eps_b = Math.max(1e-7, Math.abs(b) * 1e-5);
+            const eps_eta = Math.max(1e-7, Math.abs(eta) * 1e-5);
 
-            b = Math.max(1e-6, b);
-            eta = Math.max(1e-6, eta);
+            // Helper to compute gradients at perturbed (b_p, eta_p)
+            var computeGrad = (b_p, eta_p) => {
+                var gb = 0, ge = 0;
+                for (const d2 of data) {
+                    if (d2.time <= 0) continue;
+                    var et2 = Math.min(Math.max(eta_p * d2.time, -500), 500);
+                    var expET2 = Math.exp(et2);
+                    if (Math.abs(eta_p) < 1e-10) {
+                        var t2 = d2.time;
+                        if (d2.event === 1) { gb += 1 / b_p - t2; ge += t2 - b_p * t2 * t2 * 0.5; }
+                        else { gb += -t2; ge += -b_p * t2 * t2 * 0.5; }
+                    } else {
+                        if (d2.event === 1) {
+                            gb += 1 / b_p - (expET2 - 1) / eta_p;
+                            ge += d2.time - b_p * (d2.time * expET2 * eta_p - expET2 + 1) / (eta_p * eta_p);
+                        } else {
+                            gb += -(expET2 - 1) / eta_p;
+                            ge += -b_p * (d2.time * expET2 * eta_p - expET2 + 1) / (eta_p * eta_p);
+                        }
+                    }
+                }
+                return [gb, ge];
+            };
+
+            var [gb_pb, ge_pb] = computeGrad(b + eps_b, eta);
+            var H11 = (gb_pb - g_b) / eps_b;
+            var H12_a = (ge_pb - g_eta) / eps_b;
+
+            var [gb_pe, ge_pe] = computeGrad(b, eta + eps_eta);
+            var H12_b2 = (gb_pe - g_b) / eps_eta;
+            var H22 = (ge_pe - g_eta) / eps_eta;
+            var H12 = 0.5 * (H12_a + H12_b2);
+
+            var det = H11 * H22 - H12 * H12;
+            if (Math.abs(det) > 1e-20) {
+                var dB = -(H22 * g_b - H12 * g_eta) / det;
+                var dEta = -(-H12 * g_b + H11 * g_eta) / det;
+                var maxStep = Math.max(Math.abs(dB), Math.abs(dEta));
+                if (maxStep > 2) { var damping = 2 / maxStep; dB *= damping; dEta *= damping; }
+                b += dB;
+                eta += dEta;
+            } else {
+                // Fallback to gradient ascent
+                b += 0.0005 * g_b;
+                eta += 0.0005 * g_eta;
+            }
+
+            b = Math.max(1e-10, b);
+            // eta is allowed to be negative (decreasing hazard)
         }
 
         // Log-likelihood
         let logLik = 0;
         for (const d of data) {
             if (d.time <= 0) continue;
-            const expEtaT = Math.exp(eta * d.time);
-            const cumHaz = (b / eta) * (expEtaT - 1);
+            var etat = Math.min(Math.max(eta * d.time, -500), 500);
+            var expEtaT = Math.exp(etat);
+            var cumHaz;
+            if (Math.abs(eta) < 1e-10) {
+                cumHaz = b * d.time + 0.5 * b * eta * d.time * d.time;
+            } else {
+                cumHaz = (b / eta) * (expEtaT - 1);
+            }
 
             if (d.event === 1) {
                 logLik += Math.log(b) + eta * d.time - cumHaz;
@@ -646,7 +874,14 @@ class ModelAveragingEngine {
                 return this._upperIncompleteGammaRatio(params.shape, params.rate * t);
             }
             case 'gompertz': {
-                return Math.exp(-(params.b / params.eta) * (Math.exp(params.eta * t) - 1));
+                var etaT = Math.min(Math.max(params.eta * t, -500), 500);
+                var cumHaz;
+                if (Math.abs(params.eta) < 1e-10) {
+                    cumHaz = params.b * t + 0.5 * params.b * params.eta * t * t;
+                } else {
+                    cumHaz = (params.b / params.eta) * (Math.exp(etaT) - 1);
+                }
+                return Math.exp(-cumHaz);
             }
             default:
                 return 0;

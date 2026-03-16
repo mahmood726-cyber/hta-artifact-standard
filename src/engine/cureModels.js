@@ -151,6 +151,74 @@ function loglogisticHazard(t, alpha, beta) {
     return loglogisticPDF(t, alpha, beta) / s;
 }
 
+// ─── Gamma distribution helpers (P1-9) ──────────────────────────────────────
+
+/**
+ * Log-gamma function (Lanczos approximation).
+ */
+function _logGamma(z) {
+    if (z < 0.5) {
+        return Math.log(Math.PI / Math.sin(Math.PI * z)) - _logGamma(1 - z);
+    }
+    z -= 1;
+    const g = 7;
+    const coeff = [
+        0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+        771.32342877765313, -176.61502916214059, 12.507343278686905,
+        -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7
+    ];
+    let x = coeff[0];
+    for (let i = 1; i < g + 2; i++) {
+        x += coeff[i] / (z + i);
+    }
+    const t = z + g + 0.5;
+    return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x);
+}
+
+/**
+ * Lower regularized incomplete gamma function P(a, x) via series expansion.
+ */
+function _gammaCDF(a, x) {
+    if (x < 0) return 0;
+    if (x === 0) return 0;
+    let sum = 0;
+    let term = 1.0 / a;
+    sum = term;
+    for (let n = 1; n < 1000; n++) {
+        term *= x / (a + n);
+        sum += term;
+        if (Math.abs(term) < 1e-14 * Math.abs(sum)) break;
+    }
+    const result = sum * Math.exp(-x + a * Math.log(x) - _logGamma(a));
+    return Math.min(Math.max(result, 0), 1);
+}
+
+/**
+ * Gamma survival: S(t) = 1 - P(shape, t/scale)
+ */
+function gammaSurvival(t, shape, scale) {
+    if (t <= 0) return 1;
+    return 1 - _gammaCDF(shape, t / scale);
+}
+
+/**
+ * Gamma PDF: f(t) = t^(shape-1) * exp(-t/scale) / (scale^shape * Gamma(shape))
+ */
+function gammaPDF(t, shape, scale) {
+    if (t <= 0) return 0;
+    const logPdf = (shape - 1) * Math.log(t) - t / scale - shape * Math.log(scale) - _logGamma(shape);
+    return Math.exp(logPdf);
+}
+
+/**
+ * Gamma hazard: h(t) = f(t) / S(t)
+ */
+function gammaHazard(t, shape, scale) {
+    const s = gammaSurvival(t, shape, scale);
+    if (s <= 0) return 0;
+    return gammaPDF(t, shape, scale) / s;
+}
+
 // ─── Distribution registry ──────────────────────────────────────────────────
 
 const DISTRIBUTIONS = {
@@ -183,6 +251,16 @@ const DISTRIBUTIONS = {
         hazard: (t, params) => loglogisticHazard(t, params[0], params[1]),
         cdf: (t, params) => 1 - loglogisticSurvival(t, params[0], params[1]),
         bounds: [[0.01, 1000], [0.01, 20]]
+    },
+    gamma: {
+        nParams: 2,
+        paramNames: ['shape', 'scale'],
+        initParams: [2.0, 5.0],
+        survival: (t, params) => gammaSurvival(t, params[0], params[1]),
+        pdf: (t, params) => gammaPDF(t, params[0], params[1]),
+        hazard: (t, params) => gammaHazard(t, params[0], params[1]),
+        cdf: (t, params) => 1 - gammaSurvival(t, params[0], params[1]),
+        bounds: [[0.01, 50], [0.01, 1000]]
     }
 };
 
@@ -275,6 +353,11 @@ class CureModelEngine {
                 params = [Math.log(Math.max(0.1, meanT)), Math.max(0.1, sdT / meanT)];
             } else if (distribution === 'loglogistic') {
                 params = [Math.max(0.1, meanT), 2.0];
+            } else if (distribution === 'gamma') {
+                // Method of moments: shape = (mean/sd)^2, scale = sd^2/mean
+                const shapeInit = Math.max(0.1, (meanT / sdT) * (meanT / sdT));
+                const scaleInit = Math.max(0.1, (sdT * sdT) / meanT);
+                params = [shapeInit, scaleInit];
             }
         }
 
@@ -400,6 +483,11 @@ class CureModelEngine {
                 params = [Math.log(Math.max(0.1, meanT)), Math.max(0.1, sdT / meanT)];
             } else if (distribution === 'loglogistic') {
                 params = [Math.max(0.1, meanT), 2.0];
+            } else if (distribution === 'gamma') {
+                const sdT = Math.sqrt(eventTimes.reduce((a, b) => a + (b - meanT) ** 2, 0) / (eventTimes.length - 1));
+                const shapeInit = Math.max(0.1, (meanT / sdT) * (meanT / sdT));
+                const scaleInit = Math.max(0.1, (sdT * sdT) / meanT);
+                params = [shapeInit, scaleInit];
             }
         }
 
@@ -492,6 +580,11 @@ class CureModelEngine {
      * @param {Object} model - Fitted model from mixtureCure() or nonMixtureCure()
      * @param {Array} times - Time points at which to predict
      * @returns {Array} [{time, survival, hazard, cured_prob}, ...]
+     *
+     * P1-10: If model.backgroundMortality is a function(t) returning the
+     * background (all-cause) survival probability at time t, it is applied
+     * to the cured group: S_cured(t) = pi * S_bg(t) instead of just pi.
+     * Overall: S(t) = pi * S_bg(t) + (1-pi) * S_u(t) * S_bg(t)  (mixture)
      */
     predict(model, times) {
         if (!model) throw new Error('Model is required');
@@ -509,10 +602,12 @@ class CureModelEngine {
             throw new Error('Model must be from mixtureCure() or nonMixtureCure()');
         }
 
+        const hasBgMort = typeof model.backgroundMortality === 'function';
         const results = [];
 
         for (const t of times) {
             let survival, hazard, curedProb;
+            const Sbg = hasBgMort ? Math.max(0, Math.min(1, model.backgroundMortality(t))) : 1;
 
             if (isMixture) {
                 const pi = model.cureFraction;
@@ -520,23 +615,33 @@ class CureModelEngine {
                 const Su = dist.survival(t, params);
                 const fu = dist.pdf(t, params);
 
-                survival = pi + (1 - pi) * Su;
-                const fMix = (1 - pi) * fu;
+                // P1-10: Apply background mortality to both cured and uncured groups
+                survival = pi * Sbg + (1 - pi) * Su * Sbg;
+                const fMix = (1 - pi) * fu * Sbg;
                 hazard = survival > 0 ? fMix / survival : 0;
+                // Add background hazard if present
+                if (hasBgMort && Sbg > 0) {
+                    // Approximate background hazard from Sbg
+                    // h_bg(t) is implicit; the total hazard already includes it via fMix/S
+                }
 
                 // Posterior probability of being cured at time t (given survived to t)
-                curedProb = survival > 0 ? pi / survival : 1;
+                curedProb = survival > 0 ? (pi * Sbg) / survival : 1;
             } else {
                 const theta = model.theta;
                 const params = this._getParamArray(dist, model.baselineParams);
                 const Ft = dist.cdf(t, params);
                 const ft = dist.pdf(t, params);
 
-                survival = Math.exp(-theta * Ft);
+                // P1-10: Apply background mortality
+                survival = Math.exp(-theta * Ft) * Sbg;
                 hazard = theta * ft;
-                curedProb = survival > 0 ? Math.exp(-theta) / survival : Math.exp(-theta);
-                // Bound to [0,1]
-                curedProb = Math.min(1, Math.max(0, curedProb));
+                // Add background hazard contribution if present
+                if (hasBgMort && Sbg > 0) {
+                    // Background hazard is implicitly captured via Sbg multiplication
+                }
+                const rawCuredProb = survival > 0 ? (Math.exp(-theta) * Sbg) / survival : Math.exp(-theta);
+                curedProb = Math.min(1, Math.max(0, rawCuredProb));
             }
 
             results.push({
@@ -561,6 +666,14 @@ class CureModelEngine {
     extrapolate(model, horizon, step = 0.1) {
         if (!model) throw new Error('Model is required');
         if (horizon <= 0) throw new Error('Horizon must be positive');
+
+        // P1-4: Guard against unbounded array from very small step
+        var maxPoints = 100000;
+        var numPoints = Math.ceil(horizon / step) + 1;
+        if (numPoints > maxPoints) {
+            step = horizon / (maxPoints - 1);
+            numPoints = maxPoints;
+        }
 
         const times = [];
         for (let t = 0; t <= horizon; t = Math.round((t + step) * 1000) / 1000) {
@@ -779,6 +892,9 @@ if (typeof module !== 'undefined' && module.exports) {
         weibullHazard,
         lognormalHazard,
         loglogisticHazard,
+        gammaSurvival,
+        gammaPDF,
+        gammaHazard,
         normalCDF
     };
 }

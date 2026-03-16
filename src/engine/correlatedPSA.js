@@ -345,7 +345,20 @@ class CorrelatedPSAEngine {
         options = options || {};
         this.seed = options.seed != null ? options.seed : 12345;
         this.nIterations = options.nIterations != null ? options.nIterations : 1000;
-        this._rng = new (PCG32Ref)(this.seed);
+        this._rng = null; // Lazy init — deferred until stochastic methods need it
+    }
+
+    /**
+     * Lazy RNG accessor. Creates PCG32 on first use so the constructor
+     * does not crash when PCG32Ref is null (P0-9).
+     * @returns {Object} PCG32 instance
+     */
+    _getRng() {
+        if (!this._rng) {
+            if (!PCG32Ref) throw new Error('PCG32 dependency required for stochastic methods');
+            this._rng = new PCG32Ref(this.seed);
+        }
+        return this._rng;
     }
 
     /**
@@ -562,12 +575,13 @@ class CorrelatedPSAEngine {
         var k = means.length;
         var L = this.cholesky(corrMatrix);
         var samples = [];
+        var rng = this._getRng();
 
         for (var iter = 0; iter < n; iter++) {
             // Generate k independent standard normals
             var z = [];
             for (var j = 0; j < k; j++) {
-                z[j] = this._rng.normal(0, 1);
+                z[j] = rng.normal(0, 1);
             }
 
             // Multiply by L to get correlated normals
@@ -604,12 +618,13 @@ class CorrelatedPSAEngine {
         var sds = new Array(k).fill(1);
         var L = this.cholesky(corrMatrix);
         var samples = [];
+        var rng = this._getRng();
 
         for (var iter = 0; iter < n; iter++) {
             // Generate k independent standard normals
             var z = [];
             for (var j = 0; j < k; j++) {
-                z[j] = this._rng.normal(0, 1);
+                z[j] = rng.normal(0, 1);
             }
 
             // Correlated standard normals
@@ -683,10 +698,11 @@ class CorrelatedPSAEngine {
      * @returns {Object} PSA results
      */
     runCorrelatedPSA(model, paramDefs, corrMatrix, n) {
-        n = n || this.nIterations;
+        n = (n !== undefined && n !== null) ? n : this.nIterations;
 
         // Reset RNG for reproducibility
-        this._rng = new (PCG32Ref)(this.seed);
+        if (!PCG32Ref) throw new Error('PCG32 dependency required for stochastic methods');
+        this._rng = new PCG32Ref(this.seed);
 
         // Generate correlated samples via Gaussian copula
         var samples = this.gaussianCopula(paramDefs, corrMatrix, n);
@@ -813,6 +829,67 @@ class CorrelatedPSAEngine {
         }
 
         return corr;
+    }
+
+    /**
+     * Compute multi-comparator CEAC: for each WTP, the probability
+     * that each strategy has the highest net monetary benefit (NMB).
+     *
+     * NOTE: The single-strategy runCorrelatedPSA CEAC only checks NMB >= 0
+     * for a 2-strategy comparison. This static method handles k >= 2
+     * strategies by comparing pre-computed iteration results.
+     *
+     * @param {Object[]} strategyResults - [{name, iterations: [{costs, qalys}, ...]}, ...]
+     * @param {number[]} wtpRange - array of WTP thresholds, e.g. [0, 5000, 10000, ...]
+     * @returns {Object[]} [{wtp, probabilities: {strategyName: prob, ...}}, ...]
+     */
+    static computeCEAC(strategyResults, wtpRange) {
+        if (!Array.isArray(strategyResults) || strategyResults.length === 0) {
+            throw new Error('strategyResults must be a non-empty array');
+        }
+        if (!Array.isArray(wtpRange) || wtpRange.length === 0) {
+            throw new Error('wtpRange must be a non-empty array');
+        }
+
+        var nIter = strategyResults[0].iterations.length;
+        for (var s = 1; s < strategyResults.length; s++) {
+            if (strategyResults[s].iterations.length !== nIter) {
+                throw new Error('All strategies must have the same number of iterations');
+            }
+        }
+
+        var ceac = [];
+        for (var w = 0; w < wtpRange.length; w++) {
+            var wtp = wtpRange[w];
+            var counts = {};
+            for (var s = 0; s < strategyResults.length; s++) {
+                counts[strategyResults[s].name] = 0;
+            }
+
+            for (var i = 0; i < nIter; i++) {
+                var bestNMB = -Infinity;
+                var bestName = null;
+                for (var s = 0; s < strategyResults.length; s++) {
+                    var iter = strategyResults[s].iterations[i];
+                    var nmb = iter.qalys * wtp - iter.costs;
+                    if (nmb > bestNMB) {
+                        bestNMB = nmb;
+                        bestName = strategyResults[s].name;
+                    }
+                }
+                if (bestName !== null) {
+                    counts[bestName]++;
+                }
+            }
+
+            var probabilities = {};
+            for (var s = 0; s < strategyResults.length; s++) {
+                probabilities[strategyResults[s].name] = counts[strategyResults[s].name] / nIter;
+            }
+            ceac.push({ wtp: wtp, probabilities: probabilities });
+        }
+
+        return ceac;
     }
 }
 

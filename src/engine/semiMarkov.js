@@ -36,6 +36,8 @@ var KahanSumRef = (function() {
  * Gamma function via Lanczos approximation (for PDF computation).
  */
 function gammaFunction(z) {
+    // Poles at 0, -1, -2, ... where sin(PI*z)=0 would cause division by zero
+    if (z <= 0 && z === Math.floor(z)) return Infinity;
     if (z < 0.5) {
         return Math.PI / (Math.sin(Math.PI * z) * gammaFunction(1 - z));
     }
@@ -141,7 +143,7 @@ class SemiMarkovEngine {
      */
     constructor(options) {
         options = options || {};
-        this.maxCycles = options.maxCycles != null ? options.maxCycles : 100;
+        this.maxCycles = Math.min(options.maxCycles != null ? options.maxCycles : 100, 10000);
         this.tolerance = options.tolerance != null ? options.tolerance : 1e-9;
         this.cohortSize = options.cohortSize != null ? options.cohortSize : 1000;
         this.seed = options.seed != null ? options.seed : 12345;
@@ -225,6 +227,67 @@ class SemiMarkovEngine {
     }
 
     /**
+     * Validate the config object before running the model.
+     * @param {Object} config
+     * @throws {Error} on invalid configuration
+     */
+    _validateConfig(config) {
+        var validTypes = ['constant', 'weibull', 'gamma', 'lognormal'];
+
+        if (!config.states || !Array.isArray(config.states) || config.states.length === 0) {
+            throw new Error('Config validation: states must be a non-empty array');
+        }
+
+        if (config.initial) {
+            var sum = 0;
+            for (var i = 0; i < config.initial.length; i++) {
+                sum += config.initial[i];
+            }
+            if (Math.abs(sum - 1.0) > 0.01) {
+                throw new Error('Config validation: initial distribution must sum to ~1.0 (got ' + sum + ')');
+            }
+        }
+
+        if (config.timeHorizon != null && config.timeHorizon <= 0) {
+            throw new Error('Config validation: timeHorizon must be positive');
+        }
+
+        if (config.transitions) {
+            for (var key in config.transitions) {
+                if (!config.transitions.hasOwnProperty(key)) continue;
+
+                if (key.indexOf('->') === -1) {
+                    throw new Error('Config validation: transition key must contain "->": ' + key);
+                }
+
+                var spec = config.transitions[key];
+                if (!spec || !spec.type) {
+                    throw new Error('Config validation: transition must have a type: ' + key);
+                }
+
+                if (validTypes.indexOf(spec.type) === -1) {
+                    throw new Error('Config validation: invalid transition type "' + spec.type + '" for ' + key + '. Valid types: ' + validTypes.join(', '));
+                }
+
+                if (spec.type === 'constant') {
+                    if (spec.rate == null || spec.rate < 0) {
+                        throw new Error('Config validation: constant rate must be >= 0 for ' + key);
+                    }
+                }
+
+                if (spec.type === 'weibull' || spec.type === 'gamma') {
+                    if (spec.shape == null || spec.shape <= 0) {
+                        throw new Error('Config validation: ' + spec.type + ' shape must be > 0 for ' + key);
+                    }
+                    if (spec.scale == null || spec.scale <= 0) {
+                        throw new Error('Config validation: ' + spec.type + ' scale must be > 0 for ' + key);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * Run the semi-Markov cohort model.
      *
      * @param {Object} config
@@ -234,16 +297,24 @@ class SemiMarkovEngine {
      * @param {Object} config.costs - State costs (per cycle)
      * @param {Object} config.utilities - State utilities (QALYs per cycle)
      * @param {number} config.timeHorizon - Number of cycles to simulate
-     * @param {number} [config.discountRate=0.035] - Annual discount rate
+     * @param {number} [config.discountRate=0.035] - Annual discount rate (fallback for both costs and outcomes)
+     * @param {number} [config.discountRateCosts] - Discount rate for costs (overrides discountRate)
+     * @param {number} [config.discountRateOutcomes] - Discount rate for outcomes/QALYs (overrides discountRate)
      * @param {number} [config.cycleLength=1] - Cycle length
+     * @param {boolean} [config.halfCycleCorrection=false] - Apply trapezoidal half-cycle correction
      * @returns {Object} Results: stateTrace, totalCosts, totalQALYs, perCycle, sojournStats
      */
     run(config) {
+        this._validateConfig(config);
+
         var states = config.states;
         var nStates = states.length;
         var timeHorizon = config.timeHorizon || this.maxCycles;
         var discountRate = config.discountRate != null ? config.discountRate : 0.035;
+        var discountRateCosts = config.discountRateCosts != null ? config.discountRateCosts : discountRate;
+        var discountRateOutcomes = config.discountRateOutcomes != null ? config.discountRateOutcomes : discountRate;
         var cycleLength = config.cycleLength != null ? config.cycleLength : 1;
+        var halfCycleCorrection = config.halfCycleCorrection || false;
         var maxTunnel = Math.min(timeHorizon, this.maxCycles);
         var costs = config.costs || {};
         var utilities = config.utilities || {};
@@ -314,9 +385,13 @@ class SemiMarkovEngine {
         }
         stateTrace.push(Array.from(initialAgg));
 
+        // Store previous cycle's aggregated population for half-cycle correction
+        var prevAggPop = Array.from(initialAgg);
+
         // Simulate cycles
         for (var cycle = 0; cycle < timeHorizon; cycle++) {
-            var discountFactor = 1.0 / Math.pow(1 + discountRate, cycle);
+            var discountFactorCosts = 1.0 / Math.pow(1 + discountRateCosts, cycle);
+            var discountFactorOutcomes = 1.0 / Math.pow(1 + discountRateOutcomes, cycle);
 
             // Compute aggregated state proportions for cost/utility calculation
             var aggPop = new Float64Array(nStates);
@@ -335,13 +410,15 @@ class SemiMarkovEngine {
                 var stateName = states[s];
                 var c = costs[stateName] != null ? costs[stateName] : 0;
                 var u = utilities[stateName] != null ? utilities[stateName] : 0;
-                cycleCost += aggPop[s] * c;
-                cycleQaly += aggPop[s] * u;
+                // Half-cycle correction: trapezoidal average of current and previous cycle populations
+                var effectivePop = halfCycleCorrection ? 0.5 * (aggPop[s] + prevAggPop[s]) : aggPop[s];
+                cycleCost += effectivePop * c;
+                cycleQaly += effectivePop * u;
             }
             perCycle.push({
                 cycle: cycle,
-                costs: cycleCost * discountFactor,
-                qalys: cycleQaly * discountFactor,
+                costs: cycleCost * discountFactorCosts,
+                qalys: cycleQaly * discountFactorOutcomes,
                 stateProportions: Array.from(aggPop)
             });
 
@@ -379,9 +456,10 @@ class SemiMarkovEngine {
                     sojournTimeSum[fromS] += pop * timeInState;
                     sojournWeightSum[fromS] += pop;
 
-                    // Compute transition probabilities from this state at this time-in-state
-                    var transProbs = []; // [{toIdx, prob}]
-                    var totalTransProb = 0;
+                    // Compute transition probabilities using correct competing risks decomposition:
+                    // Sum all hazards first, compute total transition probability, then allocate proportionally.
+                    var transHazards = []; // [{toIdx, hazard}]
+                    var totalHazard = 0;
 
                     for (var key2 in transitionMap) {
                         var parts2 = key2.split('->');
@@ -391,18 +469,18 @@ class SemiMarkovEngine {
 
                         var spec = transitionMap[key2];
                         var hazard = this.sojournHazard(spec, timeInState);
-                        var prob = this.hazardToProb(hazard, cycleLength);
-                        transProbs.push({ toIdx: tIdx, prob: prob });
-                        totalTransProb += prob;
+                        transHazards.push({ toIdx: tIdx, hazard: hazard });
+                        totalHazard += hazard;
                     }
 
-                    // If total exceeds 1, normalize (competing risks approximation)
-                    if (totalTransProb > 1) {
-                        var scale = 1.0 / totalTransProb;
-                        for (var i = 0; i < transProbs.length; i++) {
-                            transProbs[i].prob *= scale;
-                        }
-                        totalTransProb = 1;
+                    // Correct competing risks: total probability from combined hazard, then proportional allocation
+                    var totalTransProb = (totalHazard > 0) ? (1 - Math.exp(-totalHazard * cycleLength)) : 0;
+                    totalTransProb = Math.min(Math.max(totalTransProb, 0), 1);
+
+                    var transProbs = [];
+                    for (var i = 0; i < transHazards.length; i++) {
+                        var allocProb = (totalHazard > 0) ? (transHazards[i].hazard / totalHazard) * totalTransProb : 0;
+                        transProbs.push({ toIdx: transHazards[i].toIdx, prob: allocProb });
                     }
 
                     // Distribute population
@@ -431,6 +509,9 @@ class SemiMarkovEngine {
                 cycleAgg[s] = total;
             }
             stateTrace.push(Array.from(cycleAgg));
+
+            // Update previous population for half-cycle correction
+            prevAggPop = Array.from(aggPop);
         }
 
         // Compute totals

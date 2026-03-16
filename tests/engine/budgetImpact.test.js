@@ -57,7 +57,9 @@ describe('BudgetImpactEngine', () => {
         expect(result.yearlyBudget[2].year).toBe(3);
         expect(typeof result.totalIncremental).toBe('number');
         expect(typeof result.totalDiscounted).toBe('number');
-        expect(result.netBudgetImpact).toBe(result.totalDiscounted);
+        // P0-6: ISPOR BIA — primary result is undiscounted
+        expect(result.netBudgetImpact).toBe(result.totalIncremental);
+        expect(result.netBudgetImpactDiscounted).toBe(result.totalDiscounted);
         expect(typeof result.perPatientIncremental).toBe('number');
         expect(result.summary.peakYear).toBeGreaterThanOrEqual(1);
         expect(result.summary.cumulativePatients).toBeGreaterThan(0);
@@ -336,11 +338,12 @@ describe('BudgetImpactEngine', () => {
     // ------------------------------------------------------------------
     // 17. perPatientIncremental calculation
     // ------------------------------------------------------------------
-    test('17. perPatientIncremental is totalDiscounted / cumulativePatients', () => {
+    test('17. perPatientIncremental is totalIncremental / cumulativePatients', () => {
         const config = makeBaseConfig();
         const result = engine.run(config);
 
-        const expected = result.totalDiscounted / result.summary.cumulativePatients;
+        // P0-6: perPatientIncremental now uses undiscounted total (ISPOR BIA)
+        const expected = result.totalIncremental / result.summary.cumulativePatients;
         expect(result.perPatientIncremental).toBeCloseTo(expected, 2);
     });
 

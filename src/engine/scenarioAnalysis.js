@@ -195,6 +195,10 @@ class ScenarioAnalysisEngine {
         // Generate all combinations (cartesian product)
         const combinations = this._cartesianProduct(dimLevels);
 
+        if (combinations.length > 10000) {
+            throw new Error('Cross-scenario produces ' + combinations.length + ' combinations (max 10,000). Reduce dimensions or levels.');
+        }
+
         const results = [];
         let totalCombinations = combinations.length;
 

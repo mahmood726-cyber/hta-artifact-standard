@@ -419,7 +419,7 @@ describe('CureModelEngine', () => {
 
     test('Validation: unknown distribution throws', () => {
         const data = generateMixtureCureData(20);
-        expect(() => engine.mixtureCure(data, { distribution: 'gamma' })).toThrow(/unknown/i);
+        expect(() => engine.mixtureCure(data, { distribution: 'pareto' })).toThrow(/unknown/i);
     });
 
     test('Validation: predict with null model throws', () => {

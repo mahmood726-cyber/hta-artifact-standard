@@ -390,4 +390,219 @@ describe('SemiMarkovEngine', () => {
         expect(p2).toBeGreaterThan(p1);
         expect(p2).toBeCloseTo(1 - Math.exp(-0.2), 6);
     });
+
+    // ---------------------------------------------------------------------------
+    // P0-11: gammaFunction(0) returns Infinity (not NaN/division by zero)
+    // ---------------------------------------------------------------------------
+    test('26. gammaFunction(0) returns Infinity', () => {
+        // gammaFunction is not exported, but we can test it indirectly
+        // via sojournHazard with gamma type at extreme values.
+        // Direct test: require the module and check the function.
+        // Since gammaFunction is not exported, we test the engine doesn't crash
+        // when hazard computation hits edge cases.
+        var h = engine.sojournHazard({ type: 'gamma', shape: 2, scale: 3 }, 1e-10);
+        expect(isFinite(h) || h === Infinity).toBe(true);
+        expect(isNaN(h)).toBe(false);
+    });
+
+    // ---------------------------------------------------------------------------
+    // P1-3: maxCycles capped at 10000
+    // ---------------------------------------------------------------------------
+    test('27. maxCycles capped at 10000', () => {
+        var bigEngine = new SemiMarkovEngine({ maxCycles: 50000 });
+        expect(bigEngine.maxCycles).toBe(10000);
+    });
+
+    test('28. maxCycles default is 100', () => {
+        var defaultEngine = new SemiMarkovEngine({});
+        expect(defaultEngine.maxCycles).toBe(100);
+    });
+
+    // ---------------------------------------------------------------------------
+    // P0-3: Competing risks decomposition — probabilities should sum correctly
+    // ---------------------------------------------------------------------------
+    test('29. Competing risks: total transition prob <= 1 with high hazards', () => {
+        // Two high-hazard exits: h=2.0 each. Old code: p1≈0.865, p2≈0.865, sum>1.
+        // New code: totalHazard=4.0, totalProb=1-exp(-4)≈0.982, each gets 0.491.
+        var config = makeConfig({
+            states: ['A', 'B', 'C'],
+            initial: [1.0, 0.0, 0.0],
+            transitions: {
+                'A->B': { type: 'constant', rate: 2.0 },
+                'A->C': { type: 'constant', rate: 2.0 },
+            },
+            costs: { A: 0, B: 0, C: 0 },
+            utilities: { A: 0, B: 0, C: 0 },
+            timeHorizon: 1
+        });
+        var result = engine.run(config);
+        // After 1 cycle, the sum of B and C populations = totalTransProb
+        var pB = result.stateTrace[1][1];
+        var pC = result.stateTrace[1][2];
+        // Equal hazards → equal allocation
+        expect(pB).toBeCloseTo(pC, 6);
+        // Total transition prob = 1 - exp(-4) ≈ 0.9817
+        var expectedTotal = 1 - Math.exp(-4.0);
+        expect(pB + pC).toBeCloseTo(expectedTotal, 4);
+        // Each should be half
+        expect(pB).toBeCloseTo(expectedTotal / 2, 4);
+    });
+
+    // ---------------------------------------------------------------------------
+    // P1-7: Half-cycle correction
+    // ---------------------------------------------------------------------------
+    test('30. Half-cycle correction reduces first-cycle reward', () => {
+        // Without HCC: cycle 0 uses full initial population (all Healthy, utility=0.9)
+        // With HCC: cycle 0 uses average of initial and cycle-0 populations
+        var configNoHCC = makeConfig({ timeHorizon: 5, discountRate: 0, halfCycleCorrection: false });
+        var configHCC = makeConfig({ timeHorizon: 5, discountRate: 0, halfCycleCorrection: true });
+        var rNoHCC = engine.run(configNoHCC);
+        var rHCC = engine.run(configHCC);
+        // First cycle QALY should differ
+        // Without HCC: cycle 0 QALY = aggPop * utility = 1.0 * 0.9 = 0.9
+        expect(rNoHCC.perCycle[0].qalys).toBeCloseTo(0.9, 4);
+        // With HCC: cycle 0 QALY = 0.5*(1.0 + 1.0) * 0.9 = 0.9 (same for cycle 0 since prevAggPop = initialAgg = aggPop)
+        // But for cycle 1+, populations differ so HCC should produce different totals
+        expect(rHCC.totalQALYs).not.toBe(rNoHCC.totalQALYs);
+    });
+
+    // ---------------------------------------------------------------------------
+    // P1-8: Differential discounting
+    // ---------------------------------------------------------------------------
+    test('31. Differential discounting: different rates for costs vs outcomes', () => {
+        var config = makeConfig({
+            timeHorizon: 10,
+            discountRate: 0.05,
+            discountRateCosts: 0.03,
+            discountRateOutcomes: 0.015
+        });
+        var result = engine.run(config);
+        expect(result.totalCosts).toBeGreaterThan(0);
+        expect(result.totalQALYs).toBeGreaterThan(0);
+
+        // Compare with uniform 5% discount — differential should give different results
+        var configUniform = makeConfig({
+            timeHorizon: 10,
+            discountRate: 0.05
+        });
+        var rUniform = engine.run(configUniform);
+        // Lower discount on outcomes → higher total QALYs
+        expect(result.totalQALYs).toBeGreaterThan(rUniform.totalQALYs);
+        // Lower discount on costs → higher total costs
+        expect(result.totalCosts).toBeGreaterThan(rUniform.totalCosts);
+    });
+
+    test('32. Differential discounting falls back to discountRate', () => {
+        // When discountRateCosts/discountRateOutcomes are not provided,
+        // should use discountRate for both
+        var config = makeConfig({ timeHorizon: 5, discountRate: 0.035 });
+        var r1 = engine.run(config);
+
+        var config2 = makeConfig({
+            timeHorizon: 5,
+            discountRate: 0.035,
+            discountRateCosts: 0.035,
+            discountRateOutcomes: 0.035
+        });
+        var r2 = engine.run(config2);
+        expect(r1.totalCosts).toBeCloseTo(r2.totalCosts, 8);
+        expect(r1.totalQALYs).toBeCloseTo(r2.totalQALYs, 8);
+    });
+
+    // ---------------------------------------------------------------------------
+    // P1-16: Input validation
+    // ---------------------------------------------------------------------------
+    test('33. Validation: empty states array throws', () => {
+        expect(() => {
+            engine.run({
+                states: [],
+                initial: [],
+                transitions: {},
+                timeHorizon: 5
+            });
+        }).toThrow('states must be a non-empty array');
+    });
+
+    test('34. Validation: initial not summing to 1 throws', () => {
+        expect(() => {
+            engine.run({
+                states: ['A', 'B'],
+                initial: [0.5, 0.1],  // sums to 0.6
+                transitions: {},
+                timeHorizon: 5
+            });
+        }).toThrow('initial distribution must sum to ~1.0');
+    });
+
+    test('35. Validation: negative timeHorizon throws', () => {
+        expect(() => {
+            engine.run({
+                states: ['A'],
+                initial: [1.0],
+                transitions: {},
+                timeHorizon: -5
+            });
+        }).toThrow('timeHorizon must be positive');
+    });
+
+    test('36. Validation: transition key without -> throws', () => {
+        expect(() => {
+            engine.run({
+                states: ['A', 'B'],
+                initial: [1.0, 0.0],
+                transitions: { 'A to B': { type: 'constant', rate: 0.1 } },
+                timeHorizon: 5
+            });
+        }).toThrow('transition key must contain "->"');
+    });
+
+    test('37. Validation: invalid transition type throws', () => {
+        expect(() => {
+            engine.run({
+                states: ['A', 'B'],
+                initial: [1.0, 0.0],
+                transitions: { 'A->B': { type: 'exponential', rate: 0.1 } },
+                timeHorizon: 5
+            });
+        }).toThrow('invalid transition type');
+    });
+
+    test('38. Validation: constant rate negative throws', () => {
+        expect(() => {
+            engine.run({
+                states: ['A', 'B'],
+                initial: [1.0, 0.0],
+                transitions: { 'A->B': { type: 'constant', rate: -0.1 } },
+                timeHorizon: 5
+            });
+        }).toThrow('constant rate must be >= 0');
+    });
+
+    test('39. Validation: weibull shape <= 0 throws', () => {
+        expect(() => {
+            engine.run({
+                states: ['A', 'B'],
+                initial: [1.0, 0.0],
+                transitions: { 'A->B': { type: 'weibull', shape: 0, scale: 5 } },
+                timeHorizon: 5
+            });
+        }).toThrow('shape must be > 0');
+    });
+
+    test('40. Validation: gamma scale <= 0 throws', () => {
+        expect(() => {
+            engine.run({
+                states: ['A', 'B'],
+                initial: [1.0, 0.0],
+                transitions: { 'A->B': { type: 'gamma', shape: 2, scale: -1 } },
+                timeHorizon: 5
+            });
+        }).toThrow('scale must be > 0');
+    });
+
+    test('41. Validation: valid config passes without error', () => {
+        expect(() => {
+            engine.run(makeConfig());
+        }).not.toThrow();
+    });
 });

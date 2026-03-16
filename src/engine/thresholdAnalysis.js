@@ -64,9 +64,10 @@ class ThresholdAnalysisEngine {
      * @param {number[]} range - [min, max]
      * @param {number} wtp - willingness-to-pay threshold
      * @param {number} [steps=100] - number of evaluation points
+     * @param {Object} [baseParams] - base parameter values to merge with the varied param (P1-5)
      * @returns {Object} threshold analysis results
      */
-    oneway(modelFn, paramName, range, wtp, steps) {
+    oneway(modelFn, paramName, range, wtp, steps, baseParams) {
         steps = steps ?? DEFAULT_STEPS;
         const [lo, hi] = range;
         const stepSize = steps > 0 ? (hi - lo) / steps : 0;
@@ -79,7 +80,9 @@ class ThresholdAnalysisEngine {
             const v = lo + i * stepSize;
             values.push(v);
 
-            const params = { [paramName]: v };
+            const params = baseParams
+                ? Object.assign({}, baseParams, { [paramName]: v })
+                : { [paramName]: v };
             const result = modelFn(params);
             const nmb = this._computeNMB(result, wtp);
             const icer = this._computeICER(result);
@@ -89,7 +92,7 @@ class ThresholdAnalysisEngine {
         }
 
         // Find threshold via bisection where NMB crosses zero
-        const thresholdResult = this.findBreakeven(modelFn, paramName, range, wtp, this.tolerance);
+        const thresholdResult = this.findBreakeven(modelFn, paramName, range, wtp, this.tolerance, baseParams);
 
         // Determine optimal strategies above and below threshold
         let optimalBelow = null;
@@ -99,8 +102,14 @@ class ThresholdAnalysisEngine {
         if (thresholdExists) {
             // Evaluate just below and above threshold
             const eps = stepSize * 0.01;
-            const belowResult = modelFn({ [paramName]: thresholdResult - eps });
-            const aboveResult = modelFn({ [paramName]: thresholdResult + eps });
+            const belowParams = baseParams
+                ? Object.assign({}, baseParams, { [paramName]: thresholdResult - eps })
+                : { [paramName]: thresholdResult - eps };
+            const aboveParams = baseParams
+                ? Object.assign({}, baseParams, { [paramName]: thresholdResult + eps })
+                : { [paramName]: thresholdResult + eps };
+            const belowResult = modelFn(belowParams);
+            const aboveResult = modelFn(aboveParams);
             const nmbBelow = this._computeNMB(belowResult, wtp);
             const nmbAbove = this._computeNMB(aboveResult, wtp);
             optimalBelow = nmbBelow >= 0 ? 'New' : 'Current';
@@ -267,14 +276,19 @@ class ThresholdAnalysisEngine {
      * @param {number[]} range - [min, max]
      * @param {number} wtp - willingness-to-pay
      * @param {number} [tolerance] - convergence tolerance
+     * @param {Object} [baseParams] - base parameter values to merge with the varied param
      * @returns {number|null} break-even value or null if none found
      */
-    findBreakeven(modelFn, paramName, range, wtp, tolerance) {
+    findBreakeven(modelFn, paramName, range, wtp, tolerance, baseParams) {
         tolerance = tolerance ?? this.tolerance;
         let [lo, hi] = range;
 
-        const loResult = modelFn({ [paramName]: lo });
-        const hiResult = modelFn({ [paramName]: hi });
+        const _makeParams = (val) => baseParams
+            ? Object.assign({}, baseParams, { [paramName]: val })
+            : { [paramName]: val };
+
+        const loResult = modelFn(_makeParams(lo));
+        const hiResult = modelFn(_makeParams(hi));
         const loNMB = this._computeNMB(loResult, wtp);
         const hiNMB = this._computeNMB(hiResult, wtp);
 
@@ -286,7 +300,7 @@ class ThresholdAnalysisEngine {
         // Bisection
         for (let iter = 0; iter < this.maxIter; iter++) {
             const mid = (lo + hi) / 2;
-            const midResult = modelFn({ [paramName]: mid });
+            const midResult = modelFn(_makeParams(mid));
             const midNMB = this._computeNMB(midResult, wtp);
 
             if (Math.abs(midNMB) < tolerance || (hi - lo) / 2 < tolerance) {
