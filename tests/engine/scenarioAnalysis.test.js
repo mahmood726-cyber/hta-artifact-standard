@@ -151,15 +151,18 @@ describe('ScenarioAnalysisEngine', () => {
             expect(result.cost_high.cost).toBe(7000);
         });
 
-        test('15. default direction uses lower for pessimistic', () => {
+        test('15. default direction detects cost-like params (P2-4: higher cost = pessimistic)', () => {
             const noDirDefs = [
                 { name: 'cost', ci: [3000, 7000] },
                 { name: 'utility', ci: [0.6, 0.95] }
             ];
             const result = engine.autoScenarios(baseParams, noDirDefs, 'extreme');
-            // Default: lower = pessimistic, upper = optimistic
-            expect(result.pessimistic.cost).toBe(3000);
-            expect(result.optimistic.cost).toBe(7000);
+            // P2-4: cost-named params get higher=pessimistic, lower=optimistic
+            expect(result.pessimistic.cost).toBe(7000);
+            expect(result.optimistic.cost).toBe(3000);
+            // Non-cost params: lower = pessimistic, upper = optimistic
+            expect(result.pessimistic.utility).toBe(0.6);
+            expect(result.optimistic.utility).toBe(0.95);
         });
     });
 

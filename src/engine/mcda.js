@@ -144,6 +144,10 @@ class MCDAEngine {
                 if (raw === undefined || raw === null) {
                     throw new Error(`Alternative "${alt.name}" missing value for criterion "${c.name}"`);
                 }
+                // P2-8: Validate criterion values are finite numbers
+                if (typeof raw !== 'number' || !isFinite(raw)) {
+                    throw new Error(`Alternative "${alt.name}" has non-finite value for criterion "${c.name}": ${raw}`);
+                }
                 const nv = this._normalize(raw, c);
                 normalizedValues[c.name] = nv;
                 score += nv * weights[c.name];

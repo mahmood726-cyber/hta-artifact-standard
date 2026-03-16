@@ -206,15 +206,30 @@ class ModelAveragingEngine {
             }
         }
 
-        // Compute AIC weights
+        // Compute AIC weights (P2-3: also compute BIC weights per NICE TSD recommendation)
         const validResults = results.filter(r => isFinite(r.aic));
         if (validResults.length > 0) {
             const minAIC = Math.min(...validResults.map(r => r.aic));
-            const rawWeights = validResults.map(r => Math.exp(-0.5 * (r.aic - minAIC)));
-            const sumW = rawWeights.reduce((a, b) => a + b, 0);
+            const rawWeightsAIC = validResults.map(r => Math.exp(-0.5 * (r.aic - minAIC)));
+            const sumAIC = rawWeightsAIC.reduce((a, b) => a + b, 0);
             for (let i = 0; i < validResults.length; i++) {
-                validResults[i].weight = sumW > 0 ? rawWeights[i] / sumW : 1 / validResults.length;
+                validResults[i].weight = sumAIC > 0 ? rawWeightsAIC[i] / sumAIC : 1 / validResults.length;
             }
+        }
+
+        // Compute BIC weights
+        const validBIC = results.filter(r => isFinite(r.bic));
+        if (validBIC.length > 0) {
+            const minBIC = Math.min(...validBIC.map(r => r.bic));
+            const rawWeightsBIC = validBIC.map(r => Math.exp(-0.5 * (r.bic - minBIC)));
+            const sumBIC = rawWeightsBIC.reduce((a, b) => a + b, 0);
+            for (let i = 0; i < validBIC.length; i++) {
+                validBIC[i].bicWeight = sumBIC > 0 ? rawWeightsBIC[i] / sumBIC : 1 / validBIC.length;
+            }
+        }
+        // Ensure all results have bicWeight (failed fits get 0)
+        for (const r of results) {
+            if (r.bicWeight == null) r.bicWeight = 0;
         }
 
         return results;
@@ -781,7 +796,7 @@ class ModelAveragingEngine {
             // eta is allowed to be negative (decreasing hazard)
         }
 
-        // Log-likelihood
+        // Log-likelihood (P2-11: cap eta*t to prevent overflow)
         let logLik = 0;
         for (const d of data) {
             if (d.time <= 0) continue;
@@ -793,9 +808,11 @@ class ModelAveragingEngine {
             } else {
                 cumHaz = (b / eta) * (expEtaT - 1);
             }
+            // Cap cumHaz to prevent -Infinity contributions
+            cumHaz = Math.min(cumHaz, 700);
 
             if (d.event === 1) {
-                logLik += Math.log(b) + eta * d.time - cumHaz;
+                logLik += Math.log(b) + Math.min(eta * d.time, 500) - cumHaz;
             } else {
                 logLik += -cumHaz;
             }
@@ -874,6 +891,7 @@ class ModelAveragingEngine {
                 return this._upperIncompleteGammaRatio(params.shape, params.rate * t);
             }
             case 'gompertz': {
+                // P2-11: Cap eta*t to prevent exp() overflow
                 var etaT = Math.min(Math.max(params.eta * t, -500), 500);
                 var cumHaz;
                 if (Math.abs(params.eta) < 1e-10) {
@@ -881,6 +899,8 @@ class ModelAveragingEngine {
                 } else {
                     cumHaz = (params.b / params.eta) * (Math.exp(etaT) - 1);
                 }
+                // Cap cumHaz to prevent -Infinity from exp(-cumHaz)
+                if (cumHaz > 700) return 0;
                 return Math.exp(-cumHaz);
             }
             default:

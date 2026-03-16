@@ -736,15 +736,17 @@ class CureModelEngine {
 
     /**
      * Fit distribution parameters via weighted MLE for the mixture cure EM M-step.
-     * Uses a grid + gradient approach.
+     * P2-12: Uses adaptive step size with Armijo backtracking line search.
      */
     _fitDistribution(data, weights, distributionName, initParams) {
         const dist = DISTRIBUTIONS[distributionName];
         let params = [...initParams];
 
-        // Simple coordinate descent with bounded updates
         const maxInnerIter = 20;
-        const stepSize = 0.05;
+        const initialStepSize = 0.1;
+        const armijoBeta = 0.5;    // step shrink factor
+        const armijoC = 1e-4;      // sufficient decrease parameter
+        const maxBacktrack = 8;
 
         for (let iter = 0; iter < maxInnerIter; iter++) {
             // Compute gradient numerically
@@ -760,18 +762,37 @@ class CureModelEngine {
                 grad[p] = (llPlus - ll0) / eps;
             }
 
-            // Update each parameter
-            let maxStep = 0;
+            // Gradient norm for convergence check
+            let gradNorm = 0;
             for (let p = 0; p < dist.nParams; p++) {
-                const step = stepSize * grad[p];
-                const clampedStep = Math.max(-1, Math.min(1, step));
-                params[p] += clampedStep;
-                // Enforce bounds
-                params[p] = Math.max(dist.bounds[p][0], Math.min(dist.bounds[p][1], params[p]));
-                maxStep = Math.max(maxStep, Math.abs(clampedStep));
+                gradNorm += grad[p] * grad[p];
             }
+            if (gradNorm < 1e-16) break;
 
-            if (maxStep < 1e-8) break;
+            // Armijo backtracking line search for adaptive step size
+            let stepSize = initialStepSize;
+            const gradDotGrad = gradNorm; // ||grad||^2
+
+            for (let bt = 0; bt < maxBacktrack; bt++) {
+                const candidate = [...params];
+                for (let p = 0; p < dist.nParams; p++) {
+                    const step = stepSize * grad[p];
+                    const clampedStep = Math.max(-1, Math.min(1, step));
+                    candidate[p] += clampedStep;
+                    candidate[p] = Math.max(dist.bounds[p][0], Math.min(dist.bounds[p][1], candidate[p]));
+                }
+                const llCandidate = this._weightedLogLik(data, weights, dist, candidate);
+                // Armijo condition: f(x + alpha*g) >= f(x) + c * alpha * ||g||^2
+                if (llCandidate >= ll0 + armijoC * stepSize * gradDotGrad) {
+                    params = candidate;
+                    break;
+                }
+                stepSize *= armijoBeta;
+                if (bt === maxBacktrack - 1) {
+                    // Accept smallest step if no improvement found
+                    params = candidate;
+                }
+            }
         }
 
         return params;

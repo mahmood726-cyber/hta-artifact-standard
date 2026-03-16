@@ -160,9 +160,17 @@ class ScenarioAnalysisEngine {
                     pessimistic[p.name] = p.ci[0];
                     optimistic[p.name] = p.ci[1];
                 } else {
-                    // Default heuristic: use lower bound for pessimistic, upper for optimistic
-                    pessimistic[p.name] = p.ci[0];
-                    optimistic[p.name] = p.ci[1];
+                    // P2-4: Default heuristic — detect likely cost params by name
+                    // (cost/price/fee) so higher = pessimistic; otherwise lower = pessimistic
+                    const nameLower = p.name.toLowerCase();
+                    const isCostLike = /cost|price|fee|charge|expense/.test(nameLower);
+                    if (isCostLike) {
+                        pessimistic[p.name] = p.ci[1]; // higher cost = worse
+                        optimistic[p.name] = p.ci[0];
+                    } else {
+                        pessimistic[p.name] = p.ci[0]; // lower benefit = worse
+                        optimistic[p.name] = p.ci[1];
+                    }
                 }
             }
 

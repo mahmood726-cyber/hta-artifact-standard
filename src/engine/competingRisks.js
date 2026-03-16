@@ -88,6 +88,33 @@ function chi2CDF(x, df) {
     return normalCDF(z / se);
 }
 
+/**
+ * Standard normal quantile (inverse CDF).
+ * Rational approximation (Abramowitz & Stegun 26.2.23).
+ * P2-10: Promoted to module-level for consistency with normalCDF.
+ * @param {number} p - Probability in (0, 1)
+ * @returns {number} z such that Phi(z) = p
+ */
+function normalQuantile(p) {
+    if (p <= 0) return -Infinity;
+    if (p >= 1) return Infinity;
+    if (p === 0.5) return 0;
+
+    const sign = p < 0.5 ? -1 : 1;
+    const pp = p < 0.5 ? p : 1 - p;
+
+    const t = Math.sqrt(-2 * Math.log(pp));
+    const c0 = 2.515517;
+    const c1 = 0.802853;
+    const c2 = 0.010328;
+    const d1 = 1.432788;
+    const d2 = 0.189269;
+    const d3 = 0.001308;
+
+    const z = t - (c0 + c1 * t + c2 * t * t) / (1 + d1 * t + d2 * t * t + d3 * t * t * t);
+    return sign * z;
+}
+
 class CompetingRisksEngine {
     constructor(options = {}) {
         this.options = {
@@ -828,27 +855,11 @@ class CompetingRisksEngine {
     }
 
     /**
-     * z-quantile for given probability p (Abramowitz & Stegun inverse).
+     * z-quantile for given probability p.
+     * P2-10: Delegates to module-level normalQuantile for consistency with normalCDF.
      */
     _zQuantile(p) {
-        // Rational approximation (Abramowitz & Stegun 26.2.23)
-        if (p <= 0) return -Infinity;
-        if (p >= 1) return Infinity;
-        if (p === 0.5) return 0;
-
-        const sign = p < 0.5 ? -1 : 1;
-        const pp = p < 0.5 ? p : 1 - p;
-
-        const t = Math.sqrt(-2 * Math.log(pp));
-        const c0 = 2.515517;
-        const c1 = 0.802853;
-        const c2 = 0.010328;
-        const d1 = 1.432788;
-        const d2 = 0.189269;
-        const d3 = 0.001308;
-
-        const z = t - (c0 + c1 * t + c2 * t * t) / (1 + d1 * t + d2 * t * t + d3 * t * t * t);
-        return sign * z;
+        return normalQuantile(p);
     }
 }
 
@@ -858,5 +869,5 @@ if (typeof window !== 'undefined') {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { CompetingRisksEngine };
+    module.exports = { CompetingRisksEngine, normalCDF, normalQuantile };
 }

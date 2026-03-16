@@ -3,7 +3,7 @@
 ### Date: 2026-03-16
 ### Personas: Statistical Methodologist, Security Auditor, Software Engineer, Domain Expert
 ### Summary: 12 P0, 18 P1, 12 P2 (deduplicated from 4 personas)
-### Status: 12/12 P0 FIXED, 18/18 P1 FIXED — 1886 tests pass
+### Status: 12/12 P0 FIXED, 18/18 P1 FIXED, 12/12 P2 FIXED — 1988 tests pass
 
 ---
 
@@ -114,20 +114,20 @@
 - **[P1-18]** evsi.js: Survival posterior variance uses hardcoded 70% event rate (line ~397)
   - Suggested fix: Make event rate a user parameter
 
-## P2 -- Minor
+## P2 -- Minor (ALL FIXED)
 
-- **[P2-1]** budgetImpact.js: `|| 0` should be `?? 0` for zero-safe fallback
-- **[P2-2]** semiMarkov.js: Float64Array allocated every cycle per state — pre-allocate and swap
-- **[P2-3]** modelAveraging.js: fitCompare defaults to AIC weights only; NICE recommends both AIC+BIC
-- **[P2-4]** scenarioAnalysis.js: autoScenarios direction heuristic backwards for cost params
-- **[P2-5]** evsi.js: Normal data variance hardcoded to 4x prior variance
-- **[P2-6]** correlatedPSA.js: correlatedNormal returns generic keys param0/param1 not named
-- **[P2-7]** evsi.js: Multi-parameter EVSI assumes independence (overestimates when correlated)
-- **[P2-8]** mcda.js: No isFinite check on criterion values — NaN propagates silently
-- **[P2-9]** semiMarkov.js: Hardcoded hazard cap of 100 — should be named constant
-- **[P2-10]** competingRisks.js: _zQuantile is instance method but normalCDF is module-level
-- **[P2-11]** modelAveraging.js: Gompertz exp(eta*t) overflow for large eta*t
-- **[P2-12]** cureModels.js: EM M-step uses gradient with fixed step instead of profile likelihood
+- **[P2-1]** budgetImpact.js: `|| 0` should be `?? 0` — ALREADY FIXED (uses `?? 0` throughout)
+- **[P2-2]** semiMarkov.js: Float64Array allocated every cycle — FIXED: double-buffer swap pattern
+- **[P2-3]** modelAveraging.js: fitCompare defaults to AIC weights only — FIXED: added bicWeight field
+- **[P2-4]** scenarioAnalysis.js: autoScenarios direction heuristic — FIXED: cost-name detection regex
+- **[P2-5]** evsi.js: Normal data variance hardcoded — FIXED: configurable dataVarianceMultiplier
+- **[P2-6]** correlatedPSA.js: correlatedNormal generic keys — FIXED: optional names parameter
+- **[P2-7]** evsi.js: Multi-parameter EVSI independence — FIXED: documented limitation in JSDoc
+- **[P2-8]** mcda.js: No isFinite check — FIXED: throws on non-finite criterion values
+- **[P2-9]** semiMarkov.js: Hardcoded hazard cap — FIXED: MAX_HAZARD_CAP named constant
+- **[P2-10]** competingRisks.js: _zQuantile inconsistency — FIXED: module-level normalQuantile + delegate
+- **[P2-11]** modelAveraging.js: Gompertz overflow — FIXED: cumHaz cap at 700, log-lik eta*t cap
+- **[P2-12]** cureModels.js: EM M-step fixed step — FIXED: Armijo backtracking line search
 
 ---
 

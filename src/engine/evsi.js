@@ -294,6 +294,14 @@ class EVSIEngine {
      * The joint EVSI >= max individual EVSI because a single study resolves
      * uncertainty in multiple parameters at once.
      *
+     * LIMITATION (P2-7): This method assumes approximate independence between
+     * parameters when computing the joint proportion of uncertainty resolved:
+     *   jointProportion = 1 - product(1 - R_i)
+     * When parameters are positively correlated, this overestimates the joint
+     * EVSI because shared uncertainty is counted multiple times. For strongly
+     * correlated parameters, consider computing EVSI for the joint parameter
+     * vector directly rather than combining individual estimates.
+     *
      * @param {Object} psaResults     - PSA results
      * @param {Array}  studyDesigns   - Array of {parameter, sampleSize, dataModel}
      * @returns {Object} joint EVSI results
@@ -407,8 +415,10 @@ class EVSIEngine {
             }
             case 'normal': {
                 // Estimate data-level variance from PSA sample spread
-                // Assume data variance ≈ 4 * prior variance (prior on mean, data on individuals)
-                const dataVar = 4 * priorVar;
+                // P2-5: configurable multiplier (default 4 = prior on mean, data on individuals)
+                const dataVarMultiplier = (studyDesign && studyDesign.dataVarianceMultiplier != null)
+                    ? studyDesign.dataVarianceMultiplier : 4;
+                const dataVar = dataVarMultiplier * priorVar;
                 return this.normalPosteriorVar(priorVar, dataVar, n);
             }
             case 'survival': {

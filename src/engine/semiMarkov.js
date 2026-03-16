@@ -131,6 +131,11 @@ function normalCDF(x) {
     return 0.5 * (1.0 + sign * erfApprox);
 }
 
+// ---------- Named Constants ----------
+
+/** Maximum hazard rate cap to prevent numerical overflow (P2-9). */
+const MAX_HAZARD_CAP = 100;
+
 // ---------- SemiMarkovEngine ----------
 
 class SemiMarkovEngine {
@@ -196,7 +201,7 @@ class SemiMarkovEngine {
                 var pdf = Math.exp(logPdf);
                 var cdf = lowerIncompleteGamma(a, t / b);
                 var survival = 1 - cdf;
-                if (survival < 1e-15) return 100; // effectively certain transition
+                if (survival < 1e-15) return MAX_HAZARD_CAP; // effectively certain transition
                 return pdf / survival;
             }
 
@@ -210,7 +215,7 @@ class SemiMarkovEngine {
                 var pdf_val = Math.exp(-0.5 * z * z) / (t * sigma * Math.sqrt(2 * Math.PI));
                 var cdf_val = normalCDF(z);
                 var surv = 1 - cdf_val;
-                if (surv < 1e-15) return 100;
+                if (surv < 1e-15) return MAX_HAZARD_CAP;
                 return pdf_val / surv;
             }
 
@@ -343,13 +348,13 @@ class SemiMarkovEngine {
         // Build tunnel state structure
         // For states with sojourn-dependent exits, we create tunnel[state][timeInState] sub-cohorts
         // tunnelPop[stateIdx][timeInState] = proportion of cohort in that tunnel
+        // P2-2: Pre-allocate two sets of buffers and swap, instead of allocating every cycle
         var tunnelPop = [];
+        var tunnelPopSwap = []; // second buffer for double-buffering
         for (var s = 0; s < nStates; s++) {
-            if (hasSojourn[s]) {
-                tunnelPop[s] = new Float64Array(maxTunnel + 1);
-            } else {
-                tunnelPop[s] = new Float64Array(1); // only index 0 used
-            }
+            var len = hasSojourn[s] ? (maxTunnel + 1) : 1;
+            tunnelPop[s] = new Float64Array(len);
+            tunnelPopSwap[s] = new Float64Array(len);
         }
 
         // Set initial distribution
@@ -422,14 +427,10 @@ class SemiMarkovEngine {
                 stateProportions: Array.from(aggPop)
             });
 
-            // Transition: build new tunnel populations
-            var newTunnelPop = [];
+            // Transition: build new tunnel populations (P2-2: reuse pre-allocated swap buffers)
+            var newTunnelPop = tunnelPopSwap;
             for (var s = 0; s < nStates; s++) {
-                if (hasSojourn[s]) {
-                    newTunnelPop[s] = new Float64Array(maxTunnel + 1);
-                } else {
-                    newTunnelPop[s] = new Float64Array(1);
-                }
+                newTunnelPop[s].fill(0);
             }
 
             // Process each state
@@ -497,7 +498,10 @@ class SemiMarkovEngine {
                 }
             }
 
+            // P2-2: Swap buffers — old tunnelPop becomes the swap for next cycle
+            var tmpPop = tunnelPop;
             tunnelPop = newTunnelPop;
+            tunnelPopSwap = tmpPop;
 
             // Record state trace after transition
             var cycleAgg = new Float64Array(nStates);

@@ -569,9 +569,10 @@ class CorrelatedPSAEngine {
      * @param {number[]} sds - Array of standard deviations
      * @param {number[][]} corrMatrix - Correlation matrix
      * @param {number} n - Number of samples
+     * @param {string[]} [names] - Optional parameter names (P2-6: use instead of generic param0/param1)
      * @returns {Object[]} Array of n objects with parameter values
      */
-    correlatedNormal(means, sds, corrMatrix, n) {
+    correlatedNormal(means, sds, corrMatrix, n, names) {
         var k = means.length;
         var L = this.cholesky(corrMatrix);
         var samples = [];
@@ -595,9 +596,11 @@ class CorrelatedPSAEngine {
             }
 
             // Scale by means and sds
+            // P2-6: Use provided names if available, fallback to param0/param1
             var sample = {};
             for (var i = 0; i < k; i++) {
-                sample['param' + i] = means[i] + sds[i] * correlated[i];
+                var key = (names && names[i]) ? names[i] : ('param' + i);
+                sample[key] = means[i] + sds[i] * correlated[i];
             }
             samples.push(sample);
         }
