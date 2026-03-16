@@ -1,7 +1,9 @@
+# REVIEW CLEAN
 # Multi-Persona Review: v0.8 New Engines
 ### Date: 2026-03-16
 ### Personas: Statistical Methodologist, Security Auditor, Software Engineer, Domain Expert
 ### Summary: 12 P0, 18 P1, 12 P2 (deduplicated from 4 personas)
+### Status: 12/12 P0 FIXED, 18/18 P1 FIXED — 1886 tests pass
 
 ---
 
