@@ -305,6 +305,7 @@ class AutomatedReportGenerator {
     }
 
     generateMethods(results) {
+        const metadata = (results && results.metadata) || {};
         return {
             title: 'Methods',
             content: `

@@ -88,10 +88,12 @@ describe('AutomatedReportGenerator — section generators', () => {
         expect(result.content).toContain('Keywords');
     });
 
-    test('generateMethods throws due to missing metadata reference (known source bug)', () => {
-        // generateMethods references `metadata` as a free variable instead of parameter.
-        // This is a documented source-code bug — verify it throws ReferenceError.
-        expect(() => gen.generateMethods(createAnalysisResults())).toThrow(ReferenceError);
+    test('generateMethods returns methods section with default metadata', () => {
+        // Previously threw ReferenceError due to free `metadata` variable — now fixed.
+        const result = gen.generateMethods(createAnalysisResults());
+        expect(result.title).toBe('Methods');
+        expect(result.content).toContain('Adult patients');
+        expect(result.content).toContain('Search Strategy');
     });
 
     test('generateResults includes pooled effect text when available', () => {

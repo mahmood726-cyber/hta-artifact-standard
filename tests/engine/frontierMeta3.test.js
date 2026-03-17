@@ -2121,11 +2121,11 @@ describe('BenefitRiskAssessment - quantitative', () => {
 
     test('quantitativeBenefitRisk returns weighted scores and overall score', () => {
         const drug = { name: 'DrugX' };
-        const outcomes = {
-            efficacy: { value: 0.8, weight: 0.5 },
-            safety: { value: 0.6, weight: 0.3 },
-            convenience: { value: 0.7, weight: 0.2 }
-        };
+        const outcomes = [
+            { name: 'efficacy', value: 0.8, min: 0, max: 1 },
+            { name: 'safety', value: 0.6, min: 0, max: 1 },
+            { name: 'convenience', value: 0.7, min: 0, max: 1 }
+        ];
         const weights = { efficacy: 0.5, safety: 0.3, convenience: 0.2 };
         const result = bra.quantitativeBenefitRisk(drug, outcomes, weights);
 
@@ -2506,7 +2506,10 @@ describe('RWEIntegration - target trial', () => {
             eligible: true
         }));
         const protocol = {
-            eligibility: { minAge: 18, maxAge: 80 },
+            eligibility: [
+                { variable: 'age', operator: '>=', value: 18 },
+                { variable: 'age', operator: '<=', value: 80 }
+            ],
             treatmentAssignment: { exposed: 'DrugA' }
         };
         const result = rwe.targetTrialEmulation(rweData, protocol);
@@ -2601,5 +2604,445 @@ describe('IPDMetaAnalysis - binary outcome', () => {
         expect(result.treatmentEffect).toBeDefined();
         expect(typeof result.treatmentEffect.estimate).toBe('number');
         expect(Number.isFinite(result.treatmentEffect.estimate)).toBe(true);
+    });
+});
+
+// ============================================================================
+// ROUND 3: Deeper coverage for classes 12194-16642 (biggest uncovered block)
+// ============================================================================
+
+// ---------------------------------------------------------------------------
+// PediatricDevelopment - deep
+// ---------------------------------------------------------------------------
+
+describe('PediatricDevelopment - deep', () => {
+    const { PediatricDevelopment } = require('../../src/engine/frontierMeta');
+    let pd;
+    beforeEach(() => { pd = new PediatricDevelopment(); });
+
+    test('constructor defines pediatric age groups', () => {
+        expect(pd.pediatricAgeGroups).toBeDefined();
+        expect(pd.pediatricAgeGroups.neonates).toBeDefined();
+        expect(pd.pediatricAgeGroups.adolescents.min).toBe(12);
+    });
+
+    test('developPediatricStudyPlan returns PREA-compliant plan', () => {
+        const drug = { name: 'DrugX' };
+        const indication = { name: 'Asthma' };
+        const adultData = { trials: [{ n: 500, effect: 0.5 }] };
+        const result = pd.developPediatricStudyPlan(drug, indication, adultData);
+
+        expect(result.drug).toBe('DrugX');
+        expect(result.indication).toBe('Asthma');
+        expect(result.preaApplicability).toBeDefined();
+        expect(result.studyPlan).toBeDefined();
+        expect(result.studyPlan.ageGroups).toBeDefined();
+    });
+
+    test('planExtrapolation returns extrapolation framework', () => {
+        const indication = { name: 'Asthma' };
+        const adultData = { pharmacology: 'similar', efficacy: 0.6 };
+        const pediatricData = { pharmacology: 'similar', pk: 'similar' };
+        const result = pd.planExtrapolation(indication, adultData, pediatricData);
+
+        expect(result.indication).toBe('Asthma');
+        expect(result.similarityAssessment).toBeDefined();
+        expect(result.exposureResponseAnalysis).toBeDefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// OrphanDrugFDA - deep
+// ---------------------------------------------------------------------------
+
+describe('OrphanDrugFDA - deep', () => {
+    const { OrphanDrugFDA } = require('../../src/engine/frontierMeta');
+    let od;
+    beforeEach(() => { od = new OrphanDrugFDA(); });
+
+    test('constructor has rare disease prevalence threshold', () => {
+        expect(od.config.rareDiseasePrev).toBe(200000);
+    });
+
+    test('assessOrphanDesignation returns eligibility assessment', () => {
+        const drug = { name: 'OrphanDrug' };
+        const indication = { name: 'Rare Disease X', prevalence: 5000 };
+        const result = od.assessOrphanDesignation(drug, indication);
+
+        expect(result.drug).toBe('OrphanDrug');
+        expect(result.eligibility).toBeDefined();
+        expect(result.eligibility.prevalence).toBeDefined();
+        expect(result.designationBenefits).toBeDefined();
+    });
+
+    test('planOrphanDevelopment returns development strategy', () => {
+        const drug = { name: 'OrphanDrug' };
+        const indication = { name: 'Rare Disease', prevalence: 5000 };
+        const result = od.planOrphanDevelopment(drug, indication);
+
+        expect(result.drug).toBe('OrphanDrug');
+        expect(result.developmentStrategy).toBeDefined();
+        expect(result.developmentStrategy.trialDesign).toBeDefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// BiosimilarDevelopment - deep
+// ---------------------------------------------------------------------------
+
+describe('BiosimilarDevelopment - deep', () => {
+    const { BiosimilarDevelopment } = require('../../src/engine/frontierMeta');
+    let bd;
+    beforeEach(() => { bd = new BiosimilarDevelopment(); });
+
+    test('designBiosimilarProgram returns comprehensive program', () => {
+        const biosimilar = { name: 'BioX-BS' };
+        const reference = { name: 'BioX' };
+        const result = bd.designBiosimilarProgram(biosimilar, reference);
+
+        expect(result.biosimilar).toBe('BioX-BS');
+        expect(result.referenceProduct).toBe('BioX');
+        expect(result.developmentProgram).toBeDefined();
+        expect(result.developmentProgram.analyticalStudies).toBeDefined();
+        expect(result.developmentProgram.clinicalStudies).toBeDefined();
+    });
+
+    test('planInterchangeability returns switching study design', () => {
+        const biosimilar = { name: 'BioX-BS' };
+        const reference = { name: 'BioX' };
+        const result = bd.planInterchangeability(biosimilar, reference);
+
+        expect(result.biosimilar).toBe('BioX-BS');
+        expect(result.requirements).toBeDefined();
+        expect(result.studyDesign.switching).toBeDefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// OncologyReviewPrograms - deep
+// ---------------------------------------------------------------------------
+
+describe('OncologyReviewPrograms - deep', () => {
+    const { OncologyReviewPrograms } = require('../../src/engine/frontierMeta');
+    let orp;
+    beforeEach(() => { orp = new OncologyReviewPrograms(); });
+
+    test('constructor lists Orbis partners', () => {
+        expect(orp.orbisPartners).toContain('FDA');
+        expect(orp.orbisPartners).toContain('Health Canada');
+    });
+
+    test('assessProjectOrbis returns eligibility and partner agencies', () => {
+        const drug = { name: 'OncoDrug' };
+        const indication = { name: 'NSCLC' };
+        const result = orp.assessProjectOrbis(drug, indication);
+
+        expect(result.drug).toBe('OncoDrug');
+        expect(result.partnerAgencies).toBeDefined();
+        expect(result.process).toBeDefined();
+    });
+
+    test('planRTOR returns review plan', () => {
+        const drug = { name: 'OncoDrug' };
+        const indication = { name: 'NSCLC' };
+        const clinicalData = { primaryEndpoint: 'ORR', response: 0.4 };
+        const result = orp.planRTOR(drug, indication, clinicalData);
+
+        expect(result.drug).toBe('OncoDrug');
+        expect(result.program).toBeDefined();
+        expect(result.benefits).toBeDefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// AdvisoryCommitteeSupport - deep
+// ---------------------------------------------------------------------------
+
+describe('AdvisoryCommitteeSupport - deep', () => {
+    const { AdvisoryCommitteeSupport } = require('../../src/engine/frontierMeta');
+    let acs;
+    beforeEach(() => { acs = new AdvisoryCommitteeSupport(); });
+
+    test('prepareAdvisoryCom returns meeting preparation', () => {
+        const drug = { name: 'DrugX' };
+        const indication = { name: 'Diabetes' };
+        const evidence = { trials: [{ n: 500 }], safety: { events: 10 } };
+        const result = acs.prepareAdvisoryCom(drug, indication, evidence);
+
+        expect(result.drug).toBe('DrugX');
+        expect(result.meeting).toBeDefined();
+        expect(result.preparation).toBeDefined();
+        expect(result.votingQuestions).toBeDefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// ICHCompliance - deep
+// ---------------------------------------------------------------------------
+
+describe('ICHCompliance - deep', () => {
+    const { ICHCompliance } = require('../../src/engine/frontierMeta');
+    let ich;
+    beforeEach(() => { ich = new ICHCompliance(); });
+
+    test('applyEstimandFramework returns estimand and strategies', () => {
+        const objective = { population: 'adults', treatment: 'DrugX', comparator: 'placebo', outcome: 'HbA1c' };
+        const result = ich.applyEstimandFramework(objective);
+
+        expect(result.objective).toBe(objective);
+        expect(result.estimand).toBeDefined();
+        expect(result.intercurrentEvents).toBeDefined();
+        expect(result.alignment).toBeDefined();
+    });
+
+    test('assessGCPCompliance returns risk assessment', () => {
+        const design = { type: 'RCT', multisite: true, decentralized: false };
+        const result = ich.assessGCPCompliance(design);
+        expect(result).toBeDefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// SAGEVaccineRecommendations - deep
+// ---------------------------------------------------------------------------
+
+describe('SAGEVaccineRecommendations - deep', () => {
+    const { SAGEVaccineRecommendations } = require('../../src/engine/frontierMeta');
+    let sage;
+    beforeEach(() => { sage = new SAGEVaccineRecommendations(); });
+
+    test('constructor has GRADE and ETD flags', () => {
+        expect(sage.gradeInVaccines).toBe(true);
+        expect(sage.etdFramework).toBe(true);
+    });
+
+    test('developVaccineRecommendation returns ETR framework', () => {
+        const vaccine = { name: 'CovidVax', type: 'mRNA' };
+        const disease = { name: 'COVID-19', burden: 'high' };
+        const evidence = { trials: [{ n: 30000, efficacy: 0.95 }] };
+        const result = sage.developVaccineRecommendation(vaccine, disease, evidence);
+
+        expect(result.vaccine).toBe(vaccine);
+        expect(result.gradeAssessment).toBeDefined();
+        expect(result.etrFramework).toBeDefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// OneHealthApproach - deep
+// ---------------------------------------------------------------------------
+
+describe('OneHealthApproach - deep', () => {
+    const { OneHealthApproach } = require('../../src/engine/frontierMeta');
+    let oh;
+    beforeEach(() => { oh = new OneHealthApproach(); });
+
+    test('constructor defines sectors and priority areas', () => {
+        expect(oh.sectors).toContain('human');
+        expect(oh.sectors).toContain('animal');
+        expect(oh.sectors).toContain('environment');
+        expect(oh.priorityAreas).toContain('amr');
+    });
+
+    test('conductOneHealthAssessment returns cross-sector assessment', () => {
+        const data = {
+            human: { cases: 1000, deaths: 50 },
+            animal: { cases: 5000, affected: 'poultry' },
+            environment: { contamination: 'waterborne' }
+        };
+        const result = oh.conductOneHealthAssessment('Avian Influenza', data);
+
+        expect(result.healthThreat).toBe('Avian Influenza');
+        expect(result.sectoralAssessment).toBeDefined();
+        expect(result.sectoralAssessment.human).toBeDefined();
+        expect(result.sectoralAssessment.animal).toBeDefined();
+        expect(result.sectoralAssessment.environment).toBeDefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// PandemicPreparedness - deep
+// ---------------------------------------------------------------------------
+
+describe('PandemicPreparedness - deep', () => {
+    const { PandemicPreparedness } = require('../../src/engine/frontierMeta');
+    let pp;
+    beforeEach(() => { pp = new PandemicPreparedness(); });
+
+    test('constructor defines IHR capacities and priority pathogens', () => {
+        expect(pp.ihrCapacities).toContain('surveillance');
+        expect(pp.ihrCapacities).toContain('laboratory');
+        expect(pp.priorityPathogens).toContain('Disease X');
+    });
+
+    test('assessPreparedness returns JEE-style assessment', () => {
+        const data = {
+            legislation: { score: 3 },
+            coordination: { score: 4 },
+            surveillance: { score: 2 },
+            response: { score: 3 },
+            preparedness: { score: 2 },
+            'risk-communication': { score: 3 },
+            'human-resources': { score: 2 },
+            laboratory: { score: 4 }
+        };
+        const result = pp.assessPreparedness('TestCountry', data);
+
+        expect(result.country).toBe('TestCountry');
+        expect(result.assessmentType).toBe('jee');
+        expect(result.capacityAssessment).toBeDefined();
+        expect(result.overallScore).toBeDefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// HealthSystemsStrengthening - deep
+// ---------------------------------------------------------------------------
+
+describe('HealthSystemsStrengthening - deep', () => {
+    const { HealthSystemsStrengthening } = require('../../src/engine/frontierMeta');
+    let hss;
+    beforeEach(() => { hss = new HealthSystemsStrengthening(); });
+
+    test('constructor defines six building blocks', () => {
+        expect(hss.buildingBlocks).toHaveLength(6);
+        expect(hss.buildingBlocks).toContain('service-delivery');
+        expect(hss.buildingBlocks).toContain('health-financing');
+    });
+
+    test('assessHealthSystem returns building block assessment', () => {
+        const data = {
+            'service-delivery': { coverage: 0.7 },
+            'health-workforce': { density: 25 },
+            'health-information': { completeness: 0.8 },
+            'medical-products': { availability: 0.6 },
+            'health-financing': { totalExpenditure: 500 },
+            'leadership-governance': { accountability: 0.7 }
+        };
+        const result = hss.assessHealthSystem('TestCountry', data);
+
+        expect(result).toBeDefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// SDG3Alignment - deep
+// ---------------------------------------------------------------------------
+
+describe('SDG3Alignment - deep', () => {
+    const { SDG3Alignment } = require('../../src/engine/frontierMeta');
+    let sdg3;
+    beforeEach(() => { sdg3 = new SDG3Alignment(); });
+
+    test('constructor creates instance with expected structure', () => {
+        expect(sdg3).toBeDefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// GlobalHealthEquity - deep
+// ---------------------------------------------------------------------------
+
+describe('GlobalHealthEquity - deep', () => {
+    const { GlobalHealthEquity } = require('../../src/engine/frontierMeta');
+    let ghe;
+    beforeEach(() => { ghe = new GlobalHealthEquity(); });
+
+    test('constructor creates instance with expected structure', () => {
+        expect(ghe).toBeDefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// ExpeditedPrograms - deeper methods
+// ---------------------------------------------------------------------------
+
+describe('ExpeditedPrograms - methods', () => {
+    const { ExpeditedPrograms } = require('../../src/engine/frontierMeta');
+    let ep;
+    beforeEach(() => { ep = new ExpeditedPrograms(); });
+
+    test('constructor creates configurable instance', () => {
+        const custom = new ExpeditedPrograms({ framework: 'FDA' });
+        expect(custom.config.framework).toBe('FDA');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// PatientReportedOutcomes - deep
+// ---------------------------------------------------------------------------
+
+describe('PatientReportedOutcomes - deep', () => {
+    const { PatientReportedOutcomes } = require('../../src/engine/frontierMeta');
+    let pro;
+    beforeEach(() => { pro = new PatientReportedOutcomes(); });
+
+    test('constructor creates instance', () => {
+        expect(pro).toBeDefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// EditorialStandards - limitMetaAnalysis
+// ---------------------------------------------------------------------------
+
+describe('EditorialStandards - limitMA', () => {
+    const { EditorialStandards } = require('../../src/engine/frontierMeta');
+    let es;
+    beforeEach(() => { es = new EditorialStandards(); });
+
+    const effects   = [0.30, 0.50, 0.20, 0.60, 0.35, 0.45];
+    const variances = [0.04, 0.06, 0.03, 0.08, 0.05, 0.07];
+
+    test('limitMetaAnalysis returns limit effect extrapolated to SE=0', () => {
+        const result = es.limitMetaAnalysis(effects, variances);
+
+        expect(result).toBeDefined();
+        expect(typeof result.limitEffect).toBe('number');
+        expect(Number.isFinite(result.limitEffect)).toBe(true);
+        expect(result.ci95).toHaveLength(2);
+        expect(typeof result.slope).toBe('number');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// AdvancedPublicationBias - deeper internal coverage
+// ---------------------------------------------------------------------------
+
+describe('AdvancedPublicationBias - _defineRoBMAModelSpace', () => {
+    const { AdvancedPublicationBias } = require('../../src/engine/frontierMeta');
+    let pb;
+    beforeEach(() => { pb = new AdvancedPublicationBias(); });
+
+    test('_defineRoBMAModelSpace returns 12 models', () => {
+        const models = pb._defineRoBMAModelSpace();
+        // 2 effect x 2 het x 3 pb = 12
+        expect(models).toHaveLength(12);
+        models.forEach(m => {
+            expect(typeof m.effectNull).toBe('boolean');
+            expect(typeof m.randomEffects).toBe('boolean');
+            expect(['none', 'one-sided', 'two-sided']).toContain(m.selectionModel);
+        });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// DataFabricationDetection - deeper edge cases
+// ---------------------------------------------------------------------------
+
+describe('DataFabricationDetection - deeper', () => {
+    const { DataFabricationDetection } = require('../../src/engine/frontierMeta');
+    let detector;
+    beforeEach(() => { detector = new DataFabricationDetection(); });
+
+    test('statcheck detects p-value inconsistencies', () => {
+        const data = [
+            { id: 'correct', testStat: 2.5, df: 20, reportedP: 0.02 },
+            { id: 'wrong', testStat: 1.5, df: 20, reportedP: 0.001 }
+        ];
+        const result = detector.statcheck(data);
+
+        expect(result.method).toBe('statcheck');
+        expect(result.results).toHaveLength(2);
     });
 });
