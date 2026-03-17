@@ -1,8 +1,28 @@
 {
   "name": "hta-artifact-standard",
   "version": "1.1.0",
-  "description": "HTA Artifact Standard - Open-source Health Technology Assessment Platform",
-  "main": "index.html",
+  "description": "Open-source Health Technology Assessment platform with 49 engines — Markov, NMA, PSA, BIA, MCDA, cure models, competing risks, Cox PH, GRADE automation, regulatory templates, and more",
+  "main": "src/engine/markov.js",
+  "browser": "index.html",
+  "files": [
+    "src/",
+    "index.html",
+    "manifest.json",
+    "service-worker.js",
+    "schemas/",
+    "reference-models/",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mahmood726-cyber/hta-artifact-standard.git"
+  },
+  "homepage": "https://github.com/mahmood726-cyber/hta-artifact-standard",
+  "bugs": {
+    "url": "https://github.com/mahmood726-cyber/hta-artifact-standard/issues"
+  },
   "scripts": {
     "test": "jest",
     "test:watch": "jest --watch",
@@ -18,22 +38,55 @@
     "external:export:r": "node scripts/run_r_export.js",
     "external:sync": "node scripts/sync_external_comparators.js",
     "external:refresh": "npm run external:export:r && npm run external:sync",
+    "test:browser": "npx playwright test",
     "quality:gate": "npm run lint && npm run test:coverage -- --runInBand && npm run validate:reference && npm run validate:determinism && npm run bench:ci && npm run build"
   },
-  "keywords": ["hta", "health-economics", "markov", "meta-analysis", "cost-effectiveness"],
+  "keywords": [
+    "hta",
+    "health-technology-assessment",
+    "health-economics",
+    "markov",
+    "meta-analysis",
+    "network-meta-analysis",
+    "cost-effectiveness",
+    "budget-impact",
+    "mcda",
+    "survival-analysis",
+    "cox-regression",
+    "cure-models",
+    "competing-risks",
+    "semi-markov",
+    "psa",
+    "evpi",
+    "evsi",
+    "grade",
+    "nice",
+    "cadth"
+  ],
   "author": "HTA Artifact Standard Contributors",
   "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "devDependencies": {
-    "jest": "^29.7.0",
-    "jest-environment-jsdom": "^29.7.0",
+    "@playwright/test": "^1.58.2",
     "@types/jest": "^29.5.12",
     "eslint": "^8.57.0",
-    "fast-check": "^3.15.0"
+    "fast-check": "^3.15.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
   },
   "jest": {
     "testEnvironment": "jsdom",
-    "roots": ["<rootDir>/tests"],
-    "collectCoverageFrom": ["src/**/*.js"],
+    "roots": [
+      "<rootDir>/tests"
+    ],
+    "testPathIgnorePatterns": [
+      "/tests/browser/"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.js"
+    ],
     "coverageThreshold": {
       "global": {
         "branches": 0,
