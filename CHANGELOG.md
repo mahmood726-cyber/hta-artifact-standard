@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.1.0 (2026-03-17) — World-Class HTA Platform
+### New Engines (8)
+- **Country Profiles**: 22 countries with WTP, discount rates, severity adjustment, currency conversion
+- **Cox PH / AFT Regression**: Newton-Raphson partial likelihood, Breslow/Efron ties, Schoenfeld PH test
+- **Guyot IPD Synthesis**: Reconstruct individual patient data from published KM curves
+- **Expected Loss**: Basu & Meltzer (2015) framework, population scaling, opportunity cost
+- **Regulatory Templates**: NICE STA, CADTH, EUnetHTA JCA, PBAC, G-BA AMNOG generators
+- **GRADE Automation**: Auto-rate 5 domains, CINeMA for NMA, OIS, SoF tables
+- **Living HTA Monitor**: Sequential analysis with O'Brien-Fleming/Pocock boundaries
+- **Cox Regression**: Standalone survival regression with concordance index
+
+### Quality
+- 3,900+ tests, 89 suites, 49 engines
+- PCG32 golden sequence fixed
+- 312 branch-coverage tests added
+- Integration tests for world-class engines
+
 ## v1.0.0 (2026-03-17) — Production Release
 ### Highlights
 - 41 engines, 2100+ tests, 56 suites
