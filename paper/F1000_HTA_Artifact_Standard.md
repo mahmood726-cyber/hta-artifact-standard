@@ -1,4 +1,4 @@
-# HTA Artifact Standard v1.0: a browser-based platform for health technology assessment with integrated evidence synthesis
+# HTA Artifact Standard v1.1: a browser-based platform for health technology assessment with 49 integrated analytical engines
 
 ## Authors
 
