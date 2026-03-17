@@ -36,11 +36,8 @@ describe('PCG32 determinism', () => {
         expect(PCG32.GOLDEN_SEQUENCE).toHaveLength(10);
     });
 
-    test('verifyDeterminism returns false (stored golden sequence is stale)', () => {
-        // The GOLDEN_SEQUENCE constants in pcg32.js do not match the actual
-        // output of PCG32(12345).nextDouble(). This is a known data issue.
-        // Determinism itself is verified by the "same seed" test above.
-        expect(PCG32.verifyDeterminism()).toBe(false);
+    test('verifyDeterminism returns true (golden sequence matches)', () => {
+        expect(PCG32.verifyDeterminism()).toBe(true);
     });
 
     test('actual sequence from seed 12345 is deterministic', () => {
