@@ -1,4 +1,4 @@
-# HTA Artifact Standard v0.6: a browser-based platform for health technology assessment with integrated evidence synthesis
+# HTA Artifact Standard v1.0: a browser-based platform for health technology assessment with integrated evidence synthesis
 
 ## Authors
 
@@ -13,7 +13,7 @@ Mahmood Ahmad ^1,2^, Niraj Kumar ^1^, Bilaal Dar ^3^, Laiba Khan ^1^, Andrew Woo
 
 ## Abstract
 
-Health technology assessment (HTA) requires the integration of economic modelling, evidence synthesis, and uncertainty analysis, yet these tasks are commonly fragmented across proprietary desktop software, statistical programming environments, and spreadsheet-based models. We present HTA Artifact Standard v0.6, an open-source, browser-based platform that unifies Markov cohort modelling, microsimulation, pairwise and network meta-analysis, probabilistic sensitivity analysis, and value-of-information computation within a single client-side application. The platform comprises 6,620 lines of HTML and 69,605 lines of JavaScript across 45 modules, requires no server-side computation, and operates offline after initial load via a Service Worker. Deterministic reproducibility is enforced through a PCG32 seeded pseudo-random number generator, Kahan summation for numerical stability, and IEEE 754 double-precision compliance. Validation comprises 200 automated tests across 10 test suites, R cross-validation against metafor v4.8-0, and three independent Markov reference fixtures that agree with R comparator outputs to within a maximum absolute error of 4.72 x 10^-5^. Bayesian NMA includes Gelman-Rubin R-hat convergence diagnostics. The software is freely available under the MIT licence.
+Health technology assessment (HTA) requires the integration of economic modelling, evidence synthesis, and uncertainty analysis, yet these tasks are commonly fragmented across proprietary desktop software, statistical programming environments, and spreadsheet-based models. We present HTA Artifact Standard v1.0, an open-source, browser-based platform that unifies 41 analytical engines — spanning Markov cohort modelling, microsimulation, pairwise and network meta-analysis, probabilistic sensitivity analysis, value-of-information computation, budget impact analysis, multi-criteria decision analysis, competing risks, cure models, semi-Markov modelling, correlated PSA, threshold analysis, model averaging, EVSI, multi-state models, and joint models — within a single client-side application. The platform requires no server-side computation and operates offline after initial load via a Service Worker. Deterministic reproducibility is enforced through a PCG32 seeded pseudo-random number generator, Kahan summation for numerical stability, and IEEE 754 double-precision compliance. Computation-intensive engines run off the main thread via a Web Worker pool. Validation comprises over 2,100 automated tests across 56 test suites — including unit tests, integration tests, property-based tests (fast-check), stress/fuzz tests, and performance benchmarks — with R cross-validation against metafor v4.8-0, and three independent Markov reference fixtures that agree with R comparator outputs to within a maximum absolute error of 4.72 x 10^-5^. Bayesian NMA includes Gelman-Rubin R-hat convergence diagnostics. Results are exportable as R, Python, and CSV for external reproducibility. The software is freely available under the MIT licence.
 
 **Keywords:** health technology assessment, cost-effectiveness analysis, Markov model, network meta-analysis, probabilistic sensitivity analysis, value of information, evidence synthesis, open-source software
 
@@ -23,20 +23,20 @@ Health technology assessment integrates clinical evidence, economic modelling, a
 
 This fragmentation introduces several difficulties. First, transferring intermediate results between tools requires manual data handling that is prone to transcription error. Second, reproducibility is compromised when analyses depend on undocumented software configurations or proprietary file formats. Third, commercial licences (TreeAge Pro costs approximately USD 6,000 per year) restrict access for researchers in resource-limited settings and for students.
 
-HTA Artifact Standard was developed to address these gaps by providing a unified, browser-based environment for the core HTA workflow: model specification, evidence synthesis, uncertainty analysis, and structured reporting. The platform runs entirely in the client browser, requires no installation, and enforces deterministic execution through explicit numerical contracts. This article describes the software architecture, analytical capabilities, validation strategy, and limitations of version 0.6.
+HTA Artifact Standard was developed to address these gaps by providing a unified, browser-based environment for the core HTA workflow: model specification, evidence synthesis, uncertainty analysis, and structured reporting. The platform runs entirely in the client browser, requires no installation, and enforces deterministic execution through explicit numerical contracts. This article describes the software architecture, analytical capabilities, validation strategy, and limitations of version 1.0.
 
 ## Methods
 
 ### Implementation
 
-HTA Artifact Standard is implemented as a client-side web application. The main entry point (`index.html`, 6,620 lines) loads 45 JavaScript modules from the `src/` directory (69,605 lines in total), organised into four subsystems:
+HTA Artifact Standard is implemented as a client-side web application. The main entry point (`index.html`) loads JavaScript modules from the `src/` directory, organised into four subsystems. Version 1.0 comprises 41 analytical engines.
 
-- **Engine** (`src/engine/`): Markov cohort simulation, microsimulation, decision trees, PSA, EVPI/EVPPI computation, network meta-analysis (Bayesian Gibbs MCMC with R-hat diagnostics and frequentist), pairwise meta-analysis (DL/REML/PM/EB with HKSJ adjustment), three-level meta-analysis, partitioned survival analysis, Mendelian randomisation, power priors for historical borrowing, publication bias methods (Egger, Begg, Copas, PET-PEESE), calibration, and automated report generation. The pairwise meta-analysis engine shares validated statistical components with related browser-based tools by the same development group, including effect size calculation, heterogeneity estimation, and confidence interval computation.
+- **Engine** (`src/engine/`): The engine subsystem contains 41 analytical modules spanning the full HTA methodology spectrum. Core engines include Markov cohort simulation, microsimulation, decision trees, PSA, EVPI/EVPPI computation, network meta-analysis (Bayesian Gibbs MCMC with R-hat diagnostics and frequentist), pairwise meta-analysis (DL/REML/PM/EB with HKSJ adjustment), three-level meta-analysis, partitioned survival analysis, Mendelian randomisation, power priors for historical borrowing, publication bias methods (Egger, Begg, Copas, PET-PEESE), calibration, and automated report generation. Version 1.0 adds 15 engines across four categories: (i) economic evaluation — budget impact analysis (BudgetImpact), multi-criteria decision analysis (MCDA), threshold analysis (ThresholdAnalysis), scenario analysis (ScenarioAnalysis), headroom analysis (HeadroomAnalysis), probabilistic BIA (ProbabilisticBIA), and network MCDA (NetworkMCDA); (ii) survival and clinical modelling — competing risks with Aalen-Johansen and Fine-Gray estimators (CompetingRisks), mixture and non-mixture cure models (CureModels), semi-Markov sojourn-time models (SemiMarkov), multi-state models (MultiStateModel), joint longitudinal-survival models (JointModel), and BIC/AIC/DIC model averaging (ModelAveraging); (iii) value of information — expected value of sample information with moment matching and optimal sample size (EVSI); and (iv) advanced PSA — correlated parameter sampling via Cholesky decomposition and Gaussian copulas (CorrelatedPSA). The pairwise meta-analysis engine shares validated statistical components with related browser-based tools by the same development group, including effect size calculation, heterogeneity estimation, and confidence interval computation. Computation-intensive engines (PSA, microsimulation, MCMC) run off the main thread via a Web Worker pool to maintain UI responsiveness.
 - **Validator** (`src/validator/`): JSON Schema validation (`project.schema.json`, `results.schema.json`), semantic rule checking (probability bounds, mass conservation, circular dependency detection, reference integrity).
 - **Parser** (`src/parser/`): A safe, non-Turing-complete expression language supporting arithmetic, built-in functions (`exp`, `ln`, `sqrt`, `rate_to_prob`, `prob_to_rate`, `if`, `clamp`), and time/age-dependent parameter references.
 - **UI** (`src/ui/`): Application controller, interactive network visualisation, beginner mode, and enhanced visualisation panels.
 
-External dependencies are limited to Chart.js and D3.js for visualisation and JSZip for artifact packaging, all loaded from CDN. The application registers a Service Worker for offline operation after initial load.
+External dependencies are limited to Chart.js and D3.js for visualisation and JSZip for artifact packaging, all loaded from CDN. The application registers a Service Worker for offline operation after initial load. All engines support R, Python, and CSV export for external reproducibility. A GitHub Actions CI pipeline (Node 18/20) enforces the full quality gate on every push.
 
 ### Deterministic execution contract
 
@@ -74,7 +74,7 @@ Users open `index.html` in a modern browser (Chrome 80+, Firefox 78+, Safari 14+
 
 ### Validation against R reference implementations
 
-The automated test suite comprises 200 tests across 10 test suites covering PSA (19), NMA (24), DES (33), microsimulation (24), meta-analysis methods (48), EVPPI (25), and the Markov engine, expression parser, sanitisation, and editorial modules. Eight pairwise meta-analysis benchmarks against R metafor v4.8-0 and meta were conducted (DerSimonian-Laird and REML estimators, fixed-effect models, HKSJ adjustment, heterogeneity statistics). All eight tests passed within the specified tolerance. Four publication bias methods (Egger, Begg, Copas, PET-PEESE) were validated against R equivalents. Trim-and-fill validation covers all three estimators (L0, R0, Q) against metafor. Bayesian NMA includes Gelman-Rubin R-hat convergence diagnostics for assessing chain mixing.
+The automated test suite comprises over 2,100 tests across 56 test suites covering all 41 engines. The test infrastructure includes four categories: (i) unit tests for each engine and utility module; (ii) integration tests (50 end-to-end scenarios exercising multi-engine workflows); (iii) property-based tests using fast-check for invariant verification across randomised inputs; and (iv) stress/fuzz tests and performance benchmarks enforced via the CI quality gate. Key engine-level test counts include PSA (19), NMA (24), DES (33), microsimulation (24), meta-analysis methods (48), EVPPI (25), budget impact analysis, MCDA, competing risks, cure models, semi-Markov, correlated PSA, threshold analysis, scenario analysis, model averaging, EVSI, multi-state models, joint models, headroom analysis, probabilistic BIA, network MCDA, and the Markov engine, expression parser, sanitisation, and editorial modules. Eight pairwise meta-analysis benchmarks against R metafor v4.8-0 and meta were conducted (DerSimonian-Laird and REML estimators, fixed-effect models, HKSJ adjustment, heterogeneity statistics). All eight tests passed within the specified tolerance. Four publication bias methods (Egger, Begg, Copas, PET-PEESE) were validated against R equivalents. Trim-and-fill validation covers all three estimators (L0, R0, Q) against metafor. Bayesian NMA includes Gelman-Rubin R-hat convergence diagnostics for assessing chain mixing.
 
 Three Markov cohort reference fixtures (simple model, age-dependent transitions, and PSA demonstration) were validated against independently executed R scripts stored in `external-comparators/r/`. Agreement was assessed using absolute and relative error metrics. The maximum absolute error across all fixtures was 4.72 x 10^-5^ for cost outcomes and the maximum relative error was 1.14 x 10^-5^, both within the tolerance thresholds of 0.01 (costs) and 0.001 (relative).
 
@@ -100,6 +100,18 @@ Table 1 compares the capabilities of HTA Artifact Standard against established a
 | Mendelian randomisation | Yes | No | Yes (MendelianRandomization) | No | No |
 | Power priors / historical borrowing | Yes | No | Partial | No | No |
 | Partitioned survival analysis | Yes | Yes | Yes (hesim) | No | Yes |
+| Budget impact analysis | Yes | No | Partial | Yes | Yes |
+| MCDA (swing weighting, rank acceptability) | Yes | No | No | No | No |
+| Competing risks (Aalen-Johansen, Fine-Gray) | Yes | No | Yes (cmprsk) | No | No |
+| Cure models (mixture, non-mixture) | Yes | No | Yes (flexsurvcure) | No | Partial |
+| Semi-Markov (sojourn-time dependent) | Yes | Partial | Yes (heemod) | No | No |
+| Multi-state models | Yes | No | Yes (mstate) | No | No |
+| Joint longitudinal-survival models | Yes | No | Yes (JM) | No | No |
+| Model averaging (BIC/AIC/DIC) | Yes | No | Yes | No | No |
+| Correlated PSA (Cholesky, copulas) | Yes | No | Yes | Partial | Partial |
+| Threshold analysis (break-even, tornado) | Yes | Yes | Partial | Yes | Yes |
+| EVSI (moment matching, optimal sample size) | Yes | No | Yes (EVSI) | No | Yes |
+| Headroom analysis | Yes | No | No | No | Partial |
 | PSA (beta/gamma/normal/lognormal) | Yes | Yes | Yes | Partial | Yes |
 | EVPI/EVPPI | Yes | Yes | Yes | No | Yes |
 | Deterministic contract (PCG32) | Yes | No | No | No | No |
@@ -111,7 +123,9 @@ Table 1 compares the capabilities of HTA Artifact Standard against established a
 
 ### Quality gates and test coverage
 
-The project enforces a continuous-integration quality gate comprising linting, unit tests with module-level coverage thresholds, reference validation, determinism checks, and performance benchmarks. The test suite comprises 200 automated tests across 10 test suites:
+The project enforces a continuous-integration quality gate via GitHub Actions (Node 18/20) comprising linting (15 ESLint rules), unit tests with module-level coverage thresholds, reference validation, determinism checks, and performance benchmarks. The test suite comprises over 2,100 automated tests across 56 test suites, organised in four tiers:
+
+**Tier 1 — Unit tests.** Each of the 41 engines has a dedicated test suite. Representative counts include:
 
 - **PSA** (19 tests): probabilistic sensitivity analysis sampling, distribution validation, and convergence checks.
 - **NMA** (24 tests): Bayesian Gibbs MCMC convergence, frequentist consistency, SUCRA rankings, node-split models, and league table generation.
@@ -119,10 +133,27 @@ The project enforces a continuous-integration quality gate comprising linting, u
 - **Microsimulation** (24 tests): individual patient trajectories, state-transition fidelity, heterogeneous cohort sampling, and aggregate outcome convergence.
 - **Meta-analysis methods** (48 tests): pairwise estimators (DL/REML/PM/EB), HKSJ adjustment, heterogeneity statistics, prediction intervals, cumulative and leave-one-out analyses, three-level meta-analysis, and trim-and-fill with L0/R0/Q estimators.
 - **EVPPI** (25 tests): GAM metamodel fitting, partial EVPI computation, parameter subgroup selection, and convergence against nested Monte Carlo benchmarks.
+- **Budget impact analysis**: population projection, market uptake curves, subpopulation stratification, and scenario comparison.
+- **MCDA**: weighted-sum aggregation, swing weighting, rank acceptability analysis, dominance detection, and weight sensitivity.
+- **Competing risks**: cumulative incidence functions, Aalen-Johansen estimator, Fine-Gray subdistribution hazards, and Gray's test.
+- **Cure models**: mixture cure (EM algorithm), non-mixture cure, and distribution comparison.
+- **Semi-Markov**: sojourn-time dependent transitions (Weibull, gamma, lognormal) and tunnel states.
+- **Correlated PSA**: Cholesky decomposition, Gaussian copulas, and multivariate sampling validation.
+- **Threshold analysis**: one-way and two-way thresholds, tornado diagrams, and bisection break-even.
+- **Model averaging**: BIC/AIC/DIC weight computation, model-averaged predictions, and survival distribution comparison.
+- **EVSI**: moment matching, optimal sample size, and population-adjusted value of information.
+- **Multi-state models, joint models, headroom analysis, probabilistic BIA, network MCDA, scenario analysis**: dedicated suites for each engine.
 - **Markov engine**: cohort simulation, half-cycle corrections, tunnel states, and time-dependent transitions.
-- **Expression parser**: arithmetic evaluation, built-in functions, variable resolution, and error handling for malformed expressions.
+- **Expression parser**: arithmetic evaluation, built-in functions, variable resolution, and error handling for malformed expressions (300+ lines of test coverage).
 - **Input sanitisation**: HTML entity encoding, script injection prevention, and attribute-context escaping.
 - **Editorial revisions**: structured reporting output, CHEERS checklist completeness, and PRISMA flow diagram generation.
+- **Utility modules**: Kahan summation (catastrophic cancellation, large-n accumulation, Neumaier variant), PCG32 (determinism, golden sequence, all 10 distributions, state save/restore), math utilities, life tables, audit logging, interoperability (TreeAge XML import, R export, Excel I/O), and JSON Schema/semantic validators.
+
+**Tier 2 — Integration tests** (50 end-to-end scenarios): multi-engine workflows exercising the full pipeline from model specification through PSA and VOI to report export.
+
+**Tier 3 — Property-based tests** (fast-check): invariant verification across randomised inputs for numerical engines, ensuring properties such as probability conservation, non-negative costs, and monotonic CEACs hold across the parameter space.
+
+**Tier 4 — Stress/fuzz tests and performance benchmarks**: large-input resilience, edge-case boundary testing, and CI-enforced performance regression detection (`npm run bench:ci`).
 
 R cross-validation against metafor v4.8-0 confirms agreement for pairwise meta-analysis (DL and REML), publication bias (Egger and Begg), three-level meta-analysis, and trim-and-fill methods.
 
@@ -152,9 +183,9 @@ An instructor teaching HTA methods at a medical school uses the platform's begin
 
 HTA Artifact Standard addresses a practical gap in the HTA tooling landscape by consolidating economic modelling and evidence synthesis into a single browser-based environment. The deterministic execution contract, enforced through seeded PRNG and Kahan summation, provides a level of reproducibility assurance that is not standard in existing tools. The MIT licence and zero-installation requirement lower barriers to adoption in both research and educational settings.
 
-The platform integrates evidence synthesis capabilities that are not typically available in commercial decision-modelling software. TreeAge Pro, the dominant commercial platform, does not implement meta-analytic, publication bias, or quality assessment methods. While R provides excellent statistical implementations through packages such as metafor [3], meta, and netmeta, it requires programming proficiency and does not offer an integrated economic modelling interface. HTA Artifact Standard occupies a middle ground: it provides a guided interface for users who are not programmers, while integrating pairwise and network meta-analysis, publication bias assessment, and Mendelian randomisation alongside economic modelling in a single environment.
+The platform integrates evidence synthesis capabilities that are not typically available in commercial decision-modelling software. TreeAge Pro, the dominant commercial platform, does not implement meta-analytic, publication bias, or quality assessment methods, and lacks budget impact analysis, MCDA, competing risks, cure models, or EVSI engines. While R provides excellent statistical implementations through packages such as metafor [3], meta, and netmeta, it requires programming proficiency and does not offer an integrated economic modelling interface. HTA Artifact Standard occupies a middle ground: it provides a guided interface for users who are not programmers, while integrating 41 engines — including pairwise and network meta-analysis, publication bias assessment, Mendelian randomisation, budget impact analysis, MCDA, competing risks, cure models, semi-Markov, correlated PSA, threshold analysis, model averaging, EVSI, multi-state models, and joint models — alongside economic modelling in a single environment.
 
-The validation strategy combines 200 automated unit and integration tests with external R comparator checks. This dual approach gives reasonable confidence in the core Markov engine, which achieves agreement with R to within 10^-5^ absolute error, and in the meta-analytic modules, which are validated against metafor for pairwise estimators, publication bias, trim-and-fill, and three-level models. Some specialised modules (Mendelian randomisation, power priors) rely primarily on integration testing through benchmark comparisons rather than comprehensive unit tests. Expanding the external validation coverage for these modules is a priority for future versions.
+The validation strategy combines over 2,100 automated tests across 56 suites — spanning unit, integration, property-based, and stress/fuzz tiers — with external R comparator checks. This multi-tier approach gives high confidence in the core Markov engine, which achieves agreement with R to within 10^-5^ absolute error, and in the meta-analytic modules, which are validated against metafor for pairwise estimators, publication bias, trim-and-fill, and three-level models. All 41 engines have dedicated test suites. Property-based tests (fast-check) verify numerical invariants across randomised inputs, and 50 integration tests exercise end-to-end multi-engine workflows. Some specialised modules (Mendelian randomisation, power priors) rely more heavily on integration testing through benchmark comparisons than on exhaustive unit-level edge-case coverage. Expanding the external validation coverage for these modules remains a priority.
 
 Users should verify that model convergence is achieved before interpreting results; the application displays convergence diagnostics and warns when iterative estimators fail to converge within the specified tolerance.
 
@@ -168,7 +199,7 @@ The following limitations should be considered when interpreting results from th
 
 3. **No individual participant data support.** IPD meta-analysis is not implemented. All meta-analytic methods operate on summary-level data.
 
-4. **Limited PSA distribution types.** Four distribution families are available (beta, gamma, lognormal, normal). Empirical or non-parametric distributions, Dirichlet distributions for multinomial parameters, and correlated sampling are not currently supported.
+4. **Limited PSA distribution types.** Four distribution families are available (beta, gamma, lognormal, normal). Correlated parameter sampling is supported via Cholesky decomposition and Gaussian copulas (CorrelatedPSA engine). However, empirical or non-parametric distributions and Dirichlet distributions for multinomial parameters are not currently supported.
 
 5. **EVPPI uses GAM metamodeling approximation.** The EVPPI module uses a GAM metamodeling approximation [11] rather than full nested Monte Carlo simulation. This is computationally efficient but may underestimate EVPPI for highly skewed or multimodal parameter distributions.
 
@@ -176,7 +207,7 @@ The following limitations should be considered when interpreting results from th
 
 7. **Dose-response meta-analysis limited.** Dose-response modelling supports the Emax model (Gauss-Newton nonlinear least squares), linear dose-response, and restricted cubic splines. Fractional polynomial and sigmoid Emax models are not implemented.
 
-8. **Test coverage.** The 200-test automated suite covers the core engine, meta-analytic, and decision-analytic modules. However, some specialised methods (e.g., Mendelian randomisation, power priors) rely primarily on integration testing through benchmark comparisons rather than comprehensive unit tests.
+8. **Test coverage.** The 2,100+ test automated suite across 56 suites covers all 41 engines, including unit, integration, property-based, and stress tests. However, some specialised methods (e.g., Mendelian randomisation, power priors) still rely more heavily on integration testing through benchmark comparisons than on exhaustive unit-level edge-case coverage.
 
 9. **Cox frailty in survival IPD-MA.** The partitioned survival and IPD meta-analysis module uses EM-estimated frailty variance for Cox frailty models. This approximation may underestimate between-study heterogeneity compared to full penalised partial likelihood estimation; a corrected implementation using direct penalised likelihood is under development.
 
@@ -188,7 +219,7 @@ The following limitations should be considered when interpreting results from th
 
 ### Future development
 
-Version 0.7 will target expanded external validation fixtures, WebR integration for in-browser cross-validation, additional PSA distribution types (Dirichlet, empirical), and IPD meta-analysis support. A formal usability study with HTA practitioners across clinical and academic settings is planned.
+Future development will target WebR integration for in-browser cross-validation, additional PSA distribution types (Dirichlet, empirical), IPD meta-analysis support, and Hamiltonian Monte Carlo (NUTS) as an alternative Bayesian NMA sampler. A formal usability study with HTA practitioners across clinical and academic settings is planned.
 
 ## Software availability
 
@@ -199,7 +230,7 @@ Version 0.7 will target expanded external validation fixtures, WebR integration 
 
 An `renv.lock` file is included to pin R package versions (R 4.5.2, metafor 4.8-0) used in external validation.
 
-- **Software version:** 0.6
+- **Software version:** 1.0
 
 ## Data availability
 

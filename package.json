@@ -1,6 +1,6 @@
 {
   "name": "hta-artifact-standard",
-  "version": "0.8.0",
+  "version": "1.0.0",
   "description": "HTA Artifact Standard - Open-source Health Technology Assessment Platform",
   "main": "index.html",
   "scripts": {

@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.0 (2026-03-17) — Production Release
+### Highlights
+- 41 engines, 2100+ tests, 56 suites
+- Full HTA methodology coverage: BIA, MCDA, competing risks, cure models, semi-Markov, correlated PSA, threshold analysis, model averaging, EVSI, multi-state models, joint models, headroom analysis
+- Integration test suite (50 E2E tests), property-based tests (fast-check), stress/fuzz tests, performance benchmarks
+- Web Worker orchestration for off-main-thread computation
+- R/Python/CSV export for all engines
+- GitHub Actions CI (Node 18/20)
+- All review findings fixed (12 P0, 18 P1, 12 P2)
+- Reference models populated (BIA, PartSA)
+
 ## v0.8.0 (2026-03-16) — Comprehensive Improvement
 ### New Engines
 - **Budget Impact Analysis** — population projection, market uptake, subpopulations, scenario comparison

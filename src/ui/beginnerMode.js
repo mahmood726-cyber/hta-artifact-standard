@@ -1732,3 +1732,11 @@ document.addEventListener('DOMContentLoaded', () => {
     beginnerMode = new BeginnerMode();
     window.beginnerMode = beginnerMode;
 });
+
+// Export for testing
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { BeginnerMode };
+}
+if (typeof window !== 'undefined') {
+    window.BeginnerMode = BeginnerMode;
+}

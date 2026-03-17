@@ -1593,3 +1593,11 @@ document.addEventListener('DOMContentLoaded', () => {
     window.runSurvivalAnalysis = () => window.app.runSurvivalAnalysis && window.app.runSurvivalAnalysis();
     window.runEVPPI = () => window.app.runEVPPI && window.app.runEVPPI();
 });
+
+// Export for testing
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { HTAApp, escapeHtml };
+}
+if (typeof window !== 'undefined') {
+    window.HTAApp = HTAApp;
+}
