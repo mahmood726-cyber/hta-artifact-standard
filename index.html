@@ -1227,6 +1227,24 @@
         <!-- Main Content (shown after file loaded) -->
         <div class="main-content" id="main-content">
             <aside class="sidebar">
+                <div class="sidebar-tools" aria-label="Sidebar navigation tools">
+                    <label class="sidebar-tools__label" for="hta-sidebar-search">Find Section</label>
+                    <input
+                        type="search"
+                        id="hta-sidebar-search"
+                        class="sidebar-search"
+                        placeholder="Search sections (/)"
+                        autocomplete="off"
+                    >
+                    <div class="sidebar-recents">
+                        <div class="sidebar-tools__row">
+                            <span class="sidebar-tools__label">Recent</span>
+                            <button type="button" class="sidebar-tools__clear" id="hta-clear-recents">Clear</button>
+                        </div>
+                        <div class="sidebar-recents__list" id="hta-recent-sections"></div>
+                    </div>
+                    <div class="sidebar-search-empty" id="hta-sidebar-empty" hidden>No sections match this filter.</div>
+                </div>
                 <div class="nav-section">
                     <h3>Overview</h3>
                     <a href="#" class="nav-item active" data-section="summary">
@@ -7069,5 +7087,290 @@
             }
         }
     </style>
+    <style>
+        .sidebar-tools {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            padding: 12px 4px 16px;
+            margin-bottom: 8px;
+            background: var(--card-bg);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sidebar-tools__label,
+        .sidebar-tools__row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .sidebar-search {
+            width: 100%;
+            margin-top: 8px;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg);
+            color: var(--text);
+            font-size: 14px;
+        }
+
+        .sidebar-search:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+        }
+
+        .sidebar-recents {
+            margin-top: 12px;
+        }
+
+        .sidebar-recents__list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .sidebar-recent-chip {
+            border: 1px solid var(--border);
+            background: var(--bg);
+            color: var(--text);
+            border-radius: 999px;
+            padding: 6px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .sidebar-recent-chip:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .sidebar-recent-chip--empty {
+            color: var(--text-muted);
+            font-size: 12px;
+            padding: 4px 0;
+        }
+
+        .sidebar-tools__clear {
+            border: none;
+            background: transparent;
+            color: var(--primary);
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            padding: 0;
+        }
+
+        .sidebar-search-empty {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: rgba(245, 158, 11, 0.08);
+            color: #92400e;
+            font-size: 12px;
+        }
+
+        .dark-mode .sidebar-tools {
+            background: #1e293b;
+        }
+
+        .dark-mode .sidebar-search {
+            background: #0f172a;
+            color: #f1f5f9;
+            border-color: #334155;
+        }
+
+        .dark-mode .sidebar-recent-chip {
+            background: #0f172a;
+            color: #e2e8f0;
+            border-color: #334155;
+        }
+
+        .dark-mode .sidebar-search-empty {
+            background: rgba(245, 158, 11, 0.16);
+            color: #fcd34d;
+        }
+
+        .nav-section[hidden],
+        .nav-item[hidden] {
+            display: none !important;
+        }
+    </style>
+    <script>
+        (function() {
+            const STORAGE_KEY = 'hta-sidebar-recent-sections-v1';
+            const MAX_RECENTS = 6;
+
+            function isEditableElement(element) {
+                if (!element) return false;
+                const tag = element.tagName;
+                return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || element.isContentEditable;
+            }
+
+            function initSidebarTools() {
+                const sidebar = document.querySelector('.sidebar');
+                const searchInput = document.getElementById('hta-sidebar-search');
+                const recentContainer = document.getElementById('hta-recent-sections');
+                const emptyState = document.getElementById('hta-sidebar-empty');
+                const clearButton = document.getElementById('hta-clear-recents');
+
+                if (!sidebar || !searchInput || !recentContainer || !emptyState) {
+                    return;
+                }
+
+                const navItems = Array.from(sidebar.querySelectorAll('.nav-item[data-section]'));
+                if (!navItems.length) {
+                    return;
+                }
+
+                const sectionIndex = navItems.map((item) => ({
+                    item,
+                    section: item.dataset.section,
+                    label: item.textContent.replace(/\s+/g, ' ').trim(),
+                    group: item.closest('.nav-section')?.querySelector('h3, h6')?.textContent?.trim() || ''
+                }));
+
+                function loadRecents() {
+                    try {
+                        const raw = localStorage.getItem(STORAGE_KEY);
+                        const parsed = raw ? JSON.parse(raw) : [];
+                        return Array.isArray(parsed) ? parsed : [];
+                    } catch (error) {
+                        return [];
+                    }
+                }
+
+                function saveRecents(recents) {
+                    try {
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(recents.slice(0, MAX_RECENTS)));
+                    } catch (error) {
+                    }
+                }
+
+                function rememberSection(sectionId) {
+                    if (!sectionId) return;
+                    const next = [sectionId].concat(loadRecents().filter((entry) => entry !== sectionId)).slice(0, MAX_RECENTS);
+                    saveRecents(next);
+                    renderRecents();
+                }
+
+                function renderRecents() {
+                    const recents = loadRecents();
+                    recentContainer.innerHTML = '';
+
+                    if (!recents.length) {
+                        const placeholder = document.createElement('div');
+                        placeholder.className = 'sidebar-recent-chip--empty';
+                        placeholder.textContent = 'No recent sections yet.';
+                        recentContainer.appendChild(placeholder);
+                        return;
+                    }
+
+                    recents.forEach((sectionId) => {
+                        const entry = sectionIndex.find((record) => record.section === sectionId);
+                        if (!entry) return;
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.className = 'sidebar-recent-chip';
+                        button.textContent = entry.label;
+                        button.addEventListener('click', function() {
+                            entry.item.click();
+                            entry.item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                        });
+                        recentContainer.appendChild(button);
+                    });
+                }
+
+                function applyFilter(query) {
+                    const normalized = String(query || '').trim().toLowerCase();
+                    let visibleCount = 0;
+
+                    sectionIndex.forEach((entry) => {
+                        const matches = !normalized || `${entry.label} ${entry.group}`.toLowerCase().includes(normalized);
+                        entry.item.hidden = !matches;
+                        if (matches) {
+                            visibleCount += 1;
+                        }
+                    });
+
+                    sidebar.querySelectorAll('.nav-section').forEach((section) => {
+                        const hasVisibleItems = Array.from(section.querySelectorAll('.nav-item[data-section]')).some((item) => !item.hidden);
+                        section.hidden = !hasVisibleItems;
+                    });
+
+                    emptyState.hidden = visibleCount > 0;
+                }
+
+                sidebar.addEventListener('click', function(event) {
+                    const target = event.target.closest('.nav-item[data-section]');
+                    if (!target) return;
+                    rememberSection(target.dataset.section);
+                });
+
+                const activeObserver = new MutationObserver(function() {
+                    const activeItem = sidebar.querySelector('.nav-item.active[data-section]');
+                    if (activeItem) {
+                        rememberSection(activeItem.dataset.section);
+                    }
+                });
+
+                activeObserver.observe(sidebar, {
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['class']
+                });
+
+                searchInput.addEventListener('input', function() {
+                    applyFilter(searchInput.value);
+                });
+
+                searchInput.addEventListener('keydown', function(event) {
+                    if (event.key === 'Escape') {
+                        searchInput.value = '';
+                        applyFilter('');
+                        searchInput.blur();
+                    }
+                });
+
+                clearButton?.addEventListener('click', function() {
+                    saveRecents([]);
+                    renderRecents();
+                });
+
+                document.addEventListener('keydown', function(event) {
+                    if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !isEditableElement(document.activeElement)) {
+                        event.preventDefault();
+                        searchInput.focus();
+                        searchInput.select();
+                    }
+                });
+
+                const activeItem = sidebar.querySelector('.nav-item.active[data-section]');
+                if (activeItem) {
+                    rememberSection(activeItem.dataset.section);
+                } else {
+                    renderRecents();
+                }
+
+                applyFilter('');
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initSidebarTools);
+            } else {
+                initSidebarTools();
+            }
+        })();
+    </script>
 </body>
 </html>
